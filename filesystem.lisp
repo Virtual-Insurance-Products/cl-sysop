@@ -86,3 +86,11 @@
 (defmethod destroy ((x fs-file))
   (execute-command (host x)
                    "rm" (full-path x)))
+
+
+(defmethod tail ((x fs-file) &key (lines 10) (output :string))
+  (execute-command (host x)
+                   "tail"
+                   (list :n lines (full-path x))
+                   :output output))
+
