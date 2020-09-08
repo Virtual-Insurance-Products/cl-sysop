@@ -1,0 +1,103 @@
+
+* Progress
+I'm starting to sketch out the general outline of the thing. I'm
+inclined to think that having declared the system I should be able to
+just go:-
+
+#+begin_src lisp
+(update-plan <some-system-description>)
+#+end_src
+
+...and get a list of steps which need to be performed to make reality
+match. 
+
+1. Basic FS operations
+   1. permissions, groups
+   2. compare file content with sha1 hash (command might differ on
+      different systems)
+2. downloaded resources
+3. caching for same
+4. services
+5. packages
+6. vmadm
+7. images
+8. utilities for certs
+9. service definitions for consul etc
+10. zfs file systems
+    1. including snapshot management
+    2. periodic scrubs? 
+
+What is the next priority for the DTW site? I need to get that up and
+should build out this cl-sysop as needed for doing that. 
+
+* Questions
+** Do I need a reified representation of differences between desired and actual state? 
+   
+   Or is the plan an adequate description of that?
+   If it isn't then what form will it take? 
+   
+   I'm not sure if I do really. 
+
+** Can plan steps just reify as function applications?
+   It would kind of seem they can, though I'm not sure. Do I need to
+   make another kind of thing to represent them or not? CLIM commands
+   are just simple s-expressions which can be evaluated. They have
+   nice print representations.
+
+   I might end up doing CLIM things here anyway. Not sure. 
+
+Let's suppose that plan steps are just like CLIM commands. Then the
+plan is just a list of method calls to invoke. So each kind of object
+has:-
+1. a set of methods for changing its state
+2. a create method
+3. a destroy method
+4. a method for looking at all the properties and seeing whether they
+   match what reality and, if they don't, generating calls to mutate
+   the object
+5. a method to determine whether to just give up, nuke the thing and
+   start over.
+
+Now, we can invoke those things in an imperative way of course, so we
+can just call ~(destroy obj)~ and then ~(create obj)~ if we
+wish. However, a generally more useful thing will be to call
+~(plan-update obj)~ to get a plan. 
+
+** Secrets
+Handling secrets with the condition system would seem good. I can have
+restarts to get secrets from vault if possible, or restarts to ask for
+secrets interactively. Then I can store SSH keys in the system
+definitions and put the private key in encrypted. 
+
+** Modifying zones
+~zonecfg -z gw -f /tmp/gw.zone~ seems to be how to change running
+zones with things like 
+#+begin_quote
+add attr
+  set name=bootrom
+  set type=string
+  set value=BHYVE_RELEASE
+end
+#+end_quote
+
+Since I have the command for adding loop file systems that's what I'd
+have to use to do what I did for the ABEL zone. This will all take a
+bit of work.
+
+** Genesis
+I guess I can start to build some pieces of this thing and just put an
+ASDF system into certain repositories until I build the whole
+thing. It will be useful for doing some of the setup. If the notation
+for the setup is very concise. 
+
+** OpenBSD pf example
+I should be able to make a set of object describing the syntax of
+pf.conf. Then I make a class for pf itself with a list of those. Then
+to update the pf I print-object (or similar) all those objects and
+then put the result into a temporary file and load it into pf. If it
+works I mv that file ontop of the old one. Of course, if the old one
+matches there is nothing to do. On error I just clear out the new one
+(if I want) and show the stderr.
+
+I must just get the command driver in place. 
+
