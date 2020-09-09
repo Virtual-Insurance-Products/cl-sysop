@@ -28,11 +28,13 @@
 ;; UNLESS you we put system in AFTER other things that we inherit which handle dependencies
 ;; that could work.
 (defmethod update-plan ((system system) &optional without)
-  (append (call-next-method)
-          (reduce #'append
-                  (mapcar (lambda (c)
-                            (update-plan c without))
-                          (subcomponents system)))))
+  (if (exists-p system)
+      (append (call-next-method)
+              (reduce #'append
+                      (mapcar (lambda (c)
+                                (update-plan c without))
+                              (subcomponents system))))
+      (create-plan system)))
 
 ;; this recurses down passing without
 (defmethod update-plan ((system without) &optional without)
@@ -48,6 +50,12 @@
 
 ;; the default CREATE plan for a component is...
 (defmethod create-plan ((x component)) `((create ,x)))
+
+(defmethod create-plan ((x system))
+  (append (call-next-method)
+          (reduce #'append
+                  (mapcar #'create-plan
+                          (subcomponents x)))))
 
 ;; This is quite vague
 ;; the plan ought to be more detailed than this

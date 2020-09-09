@@ -13,4 +13,5 @@
                (:file "hosts")
                (:file "shell")
                (:file "filesystem")
+               (:file "vmadm")
                ))

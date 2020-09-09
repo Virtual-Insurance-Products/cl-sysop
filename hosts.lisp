@@ -11,7 +11,7 @@
   ((subcomponents :initarg :subcomponents :initform nil :reader subcomponents)
    ;; this is used to cache the list of installed packages
    ;; it will be cleared before the plan phase
-   (installed-packages :accessor installed-packages)))
+   (installed-packages :reader installed-packages)))
 
 (defmethod update-plan :before ((host unix-host) &optional without)
   (declare (ignore without))
@@ -57,27 +57,59 @@
 
 ;; and this is a smartos host
 (defclass smartos-host (sshd-host solaris-global-zone)
-  ())
+  ;; these things without initargs or writers are read only properties for interrogating running systems
+  ;; to specify that you WANT a vm to exist on a host just put it as one of the subcomponents
+  ((vms :reader vms)))
+
+;; Clear the cached vms before starting to plan
+(defmethod update-plan :before ((host smartos-host) &optional without)
+  (declare (ignore without))
+  (slot-makunbound host 'vms))
+
+;; general properties of a zone - there are lots more
+;; 
+(defclass smartos-zone (component)
+  ;; uuid will probably be pulled into a superclass
+  ((uuid :reader uuid)
+   type ram state
+   (alias :reader alias :initarg :alias)
+   customer_metadata.source_uuid image_uuid
+   ))
+
+(defmethod print-object ((instance smartos-zone) stream)
+  (if (slot-boundp instance 'alias)
+      (print-unreadable-object (instance stream)
+        (let* ((class (class-of instance))
+               (class-name (class-name class)))
+          (format stream "~A ~A" class-name (alias instance))))
+      (call-next-method)))
 
 ;; this is a component as well as a system (which will be very common)
-(defclass joyent-zone (solaris-host component)
-  ())
+(defclass joyent-zone (smartos-zone solaris-host component) ())
+(defclass lx-zone (smartos-zone unix-host component)
+  ((type :initform "LX")))
 
 
 
-(defclass darwin-localhost (darwin-host localhost)
-  ())
+(defclass darwin-localhost (darwin-host localhost) ())
+(defclass solaris-localhost (solaris-host localhost) ())
+(defclass linux-localhost (darwin-host localhost) ())
 
 ;; try and get a more specific instance
 (defmethod initialize-instance :after ((x localhost) &rest initargs)
-  (declare (ignore initargs))
   (unless (slot-boundp x 'name)
     (setf (name x)
           (execute-command x
                            "hostname" nil :output :first-line)))
   (when (eq 'localhost (type-of x))
     ;; etc
-    #+darwin (change-class x 'darwin-localhost)))
+    #+darwin (change-class x 'darwin-localhost)
+    #+solaris (change-class x 'solaris-localhost)
+    #+linux (change-class x 'linux-localhost)
+
+    ;; call the initialize method again in case it has more work to do now it knows what /type/ of host it is
+    (apply #'initialize-instance (cons x initargs))))
+
 
 ;; (make-instance 'localhost)
 
@@ -166,3 +198,10 @@
 ;; we can detect that error like this, so this is a reliable way to test for files. I think.
 ;; although what if there's a different error? 
 ;; (handler-case (execute-command (localhost) "test" '("-f" "/Users/david/foo.txt")) (shell-error (c) (error-code c)))
+
+
+(defmethod make-shell-command-for-host ((host smartos-zone) command args)
+  (make-shell-command-for-host (parent host)
+                               "zlogin"
+                               (list (uuid host)
+                                     (make-shell-command command args))))

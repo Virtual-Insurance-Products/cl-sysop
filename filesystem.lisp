@@ -2,7 +2,9 @@
 (in-package :cl-sysop)
 
 (defclass fs-object (component named)
-  ((full-path :type string :accessor full-path :initarg :full-path)))
+  ((full-path :type string :accessor full-path :initarg :full-path)
+   (existing-content :reader existing-content)))
+
 
 (defmethod destroy-plan ((x fs-object))
   `((destroy ,x)))
@@ -20,8 +22,10 @@
 
 ;; It might be useful to define a constructor function, but I'm not sure
 
-(defclass fs-directory (fs-object system)
-  ((subcomponents :initarg :content :reader subcomponents)))
+(defclass fs-directory (system fs-object)
+  ((subcomponents :initarg :content :reader subcomponents)
+   ;; if this is set then we will empty any OTHER content of the directory
+   (exclude-others :initform nil :initarg :exclude-others :reader exclude-others)))
 
 (defmethod initialize-instance :after ((x fs-object) &rest initargs)
   (declare (ignore initargs))
@@ -29,6 +33,42 @@
              (not (slot-boundp x 'name)))
     (setf (name x)
           (first (last (cl-ppcre:split "/" (full-path x)))))))
+
+(defmethod update-plan :before ((dir fs-directory) &optional without)
+  (declare (ignore without))
+  (slot-makunbound dir 'existing-content))
+
+(defmethod existing-content :before ((dir fs-directory))
+  (unless (slot-boundp dir 'existing-content)
+    (when (exists-p dir)
+      (setf (slot-value dir 'existing-content)
+            (loop for line in (setf (slot-value dir 'existing-content)
+                                    (execute-command (host dir)
+                                                     "ls"
+                                                     (list :p (concatenate 'string
+                                                                           (full-path dir) "/"))
+                                                     :output :lines))
+                  collect (cond ((cl-ppcre:scan "/$" line)
+                                 (adopt dir (make-instance 'fs-directory :name (subseq line 0
+                                                                                       (1- (length line)))
+                                                                         :content nil)))
+                                (t (adopt dir (make-instance 'fs-file :name line))))))
+      )))
+
+(defmethod update-plan ((dir fs-directory) &optional without)
+  (unless without
+    (if (exclude-others dir)
+        (let ((existing (existing-content dir)))
+          (append (reduce #'append
+                          (loop for f in existing
+                                unless (find f (subcomponents dir) :test (lambda (a b)
+                                                                           (and (equal (full-path a)
+                                                                                       (full-path b))
+                                                                                (subtypep (type-of a)
+                                                                                          (type-of b)))))
+                                  collect (destroy-plan f)))
+                  (call-next-method)))
+        (call-next-method))))
 
 (defmethod print-object ((x fs-object) (s stream))
   (print-unreadable-object (x s)
@@ -67,6 +107,12 @@
 (defmethod exists-p ((f fs-object))
   (fs-object-exists-on-host f (host f)))
 
+(defmethod fs-object-exists-on-host ((f fs-object) (host unix-host))
+  (handler-case
+      (execute-command host "ls" (list "-l" (full-path f)))
+    (shell-error (c)
+      (when (cl-ppcre:scan "no such file" (standard-error c))
+        nil))))
 
 
 (defclass downloaded-resource (fs-file)

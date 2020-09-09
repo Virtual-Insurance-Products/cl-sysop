@@ -101,3 +101,38 @@ matches there is nothing to do. On error I just clear out the new one
 
 I must just get the command driver in place. 
 
+** State maintenance
+I can probably do a lot with this declarative notation. For example,
+if I have something running and periodically evaluating the state of
+the world and the state describes that there should be snapshots on
+some particular schedule and they should be cleared off if older than
+some certain time. 
+
+Likewise evaluating whether services are running and responding to
+HTTP requests could be done in the same way. It would be good if we
+didn't keep restarting things on a rapid schedule. 
+
+Also LOGGING is going to be a Very Good Idea for this sort of thing. I
+need a way of dealing with that. Not sure what. 
+
+It would also probably be very useful to integrate with consul
+somehow. We can use KV storage for a start. I need to do some module
+to integrate with that.
+
+Ideally I would need some flexibility here to monitor different
+systems on different schedules. It would be good to be multi threaded
+here too. Perhaps start a thread for each one. 
+
+** Installation on other systems
+Of course, if I run this thing in, say, the ovh1 GZ then I can connect
+via slime (advertise via consul) and control things like that. 
+
+I would need, somehow, to have system definitions stored somewhere. It
+would make sense to have them contained in a git repository and one of
+the system definitions the system evaluates would be to update its
+system definitions and then restart itself if they change. I need a
+way to check to see if a git repo needs to be updated, so I must
+automate that.
+
+I think this is all looking very much inline with the vague idea I had
+for Red Queen. 
