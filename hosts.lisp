@@ -117,7 +117,10 @@
 ;; don't use this instance to create systems on localhost though - we don't want to keep replacing the subcomponents
 ;; is this a nice way to construct things? Probably
 (defun localhost (&rest components)
-  (make-instance 'localhost :subcomponents components))
+  (make-instance 'localhost :subcomponents components
+                 ;; I'm going to put this here to stop spurious hostname commands
+                 ;; use make-instance if you want to find out the name
+                 :name "localhost"))
 
 
 ;; When we consider local-host we should further identify it by running uname if needed
