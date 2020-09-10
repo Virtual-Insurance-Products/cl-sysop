@@ -16,16 +16,18 @@
 
 ;; If we need to invoke a subshell this escapes things reliably.
 (defun escape-for-shell (string)
-  (with-output-to-string (stream)
-    (write-char #\' stream)
+  (if (cl-ppcre:scan "^[a-zA-Z\\d\\-\\/\\.\\_]+$" string)
+      string ; let's not escape the whatsit out of everything
+      (with-output-to-string (stream)
+        (write-char #\' stream)
 
-    (loop for a across string
-          do
-             (cond ((eq a #\')
-                    (write-string "'\\''" stream))
-                   (t (write-char a stream))))
+        (loop for a across string
+              do
+                 (cond ((eq a #\')
+                        (write-string "'\\''" stream))
+                       (t (write-char a stream))))
 
-    (write-char #\' stream)))
+        (write-char #\' stream))))
 
 ;; (escape-for-shell "Hi 'there")
 
