@@ -28,13 +28,18 @@
 ;; UNLESS you we put system in AFTER other things that we inherit which handle dependencies
 ;; that could work.
 (defmethod update-plan ((system system) &optional without)
-  (if (exists-p system)
-      (append (call-next-method)
-              (reduce #'append
-                      (mapcar (lambda (c)
-                                (update-plan c without))
-                              (subcomponents system))))
-      (create-plan system)))
+  (append (call-next-method)
+          (reduce #'append
+                  (mapcar (lambda (c)
+                            (update-plan c without))
+                          (subcomponents system)))))
+
+(defmethod update-plan :around ((c component) &optional without)
+  (if without
+      (call-next-method)
+      (if (exists-p c)
+          (call-next-method)
+          (create-plan c))))
 
 ;; this recurses down passing without
 (defmethod update-plan ((system without) &optional without)
@@ -124,4 +129,15 @@
                               (make-instance 'fs-file :full-path "/Users/david/blah-blah.txt"
                                                       :content "A humble text file")))))
 
+
+(defmacro with-temporary-resources (bindings &body forms)
+  `(let ,bindings
+     (let ((value nil))
+       (unwind-protect
+            (setf value
+                  (progn
+                    ,@forms))
+         ,@ (loop for (var) in bindings
+                  collect `(destroy ,var)))
+       value)))
 

@@ -47,3 +47,9 @@
   (make-instance 'without :subcomponents components))
 
 ;; (localhost (without (make-instance 'brew-package :name "ledger")))
+
+
+;; This simply ensures that create calls return the created component
+(defmethod create :around ((x component))
+  (call-next-method)
+  x)
