@@ -20,7 +20,37 @@
    (owner)
    (group)))
 
+(defmethod existing-content :before ((file fs-file))
+  (unless (slot-boundp file 'existing-content)
+    (when (exists-p file)
+      (setf (slot-value file 'existing-content)
+            (execute-command (host file)
+                             "cat"
+                             (full-path file))))))
+
+
 ;; It might be useful to define a constructor function, but I'm not sure
+
+;; we can just replace it
+;; I'm only giving this op a different name to distinguish it
+(defmethod update-file-content ((file fs-file))
+  (create file))
+
+(defmethod update-plan ((file fs-file) &optional without)
+  (if without
+      (call-next-method)
+      (append (call-next-method)
+              (when (slot-boundp file 'content)
+                (unless (equal (content file)
+                               (existing-content file))
+                  `((update-file-content ,file)))))))
+
+(defmethod diff ((file fs-file))
+  (diff:render-diff (diff:generate-seq-diff 'diff:unified-diff ; or diff:context-diff
+                                            (cl-ppcre:split "\\n" (existing-content file))
+                                            (cl-ppcre:split "\\n" (content file)))
+                    *standard-output*))
+
 
 (defclass fs-directory (system fs-object)
   ((subcomponents :initarg :content :reader subcomponents)
@@ -139,4 +169,13 @@
                    "tail"
                    (list :n lines (full-path x))
                    :output output))
+
+
+
+
+(defun temporary-file (content &optional (host (make-instance 'localhost :name "localhost")))
+  (create (adopt host
+                 (make-instance 'fs-file :content content
+                                         :full-path (concatenate 'string "/tmp/"
+                                                                 (vip-utils:random-string 20))))))
 
