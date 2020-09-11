@@ -4,7 +4,9 @@
 ;; smf services have a concept of instances
 (defclass smf-service (service)
   ((instance :initform "default" :reader instance)
-   (enabled :initform t :reader enabled)))
+   (enabled :initform t :reader enabled :initarg :enabled)
+   (current-state :reader current-state)
+   (current-state-since :reader current-state-since)))
 
 ;; check whether the service exists
 
@@ -23,13 +25,23 @@
                                                     "svcs" (list "-L" (fmri x))
                                                     :output :first-line))))
 
-(defmethod current-state ((svc smf-service))
+(defmethod get-current-state ((svc smf-service))
   (destructuring-bind (state since fmri)
       (cl-ppcre:split "\\s+"
-                      (execute-command (host *forwarding*)
-                                       "svcs" (list "-H" (fmri *forwarding*))
+                      (execute-command (host svc)
+                                       "svcs" (list "-H" (fmri svc))
                                        :output :first-line))
-    (values state since fmri)))
+    (declare (ignore fmri))
+    (setf (slot-value svc 'current-state) state
+          (slot-value svc 'current-state-since) since)))
+
+(defmethod current-state :before ((svc smf-service))
+  (unless (slot-boundp svc 'current-state)
+    (get-current-state svc)))
+
+(defmethod current-state-since :before ((svc smf-service))
+  (unless (slot-boundp svc 'current-state-since)
+    (get-current-state svc)))
 
 ;; we need: clear, enable, disable
 ;; if the service goes into maintenance then we will attempt to clear it if enabled is requested

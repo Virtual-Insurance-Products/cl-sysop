@@ -36,8 +36,8 @@
   ((user :initarg :user :reader user)
    (access-from :initarg :access-from :initform localhost :reader access-from)
    ;; allow specification of which key to use for which host.
-   ;; (key)
-   ))
+   (key :initarg :key :reader key)))
+
 
 
 ;; has SMF, pkgin
@@ -71,10 +71,25 @@
 (defclass smartos-zone (component)
   ;; uuid will probably be pulled into a superclass
   ((uuid :reader uuid)
-   type ram state
+   type ram
+   ;; desired state
+   (state :initform "running" :initarg :state :reader state)
    (alias :reader alias :initarg :alias)
-   customer_metadata.source_uuid image_uuid
+   customer_metadata.source_uuid
+   (image_uuid :initarg :image-uuid :reader image-uuid)
+
+   (max_physical_memory :reader max-physical-memory :initarg :max-physical-memory :initform 256)
+   (quota :initform 0 :initarg :quote :reader quota)
+   (resolvers :initform (list "8.8.8.8" "8.8.4.4") :initarg :resolvers :reader resolvers)
+
+   (nics :initarg :nics :reader nics)
+   
    ))
+
+(defmethod name ((x smartos-zone))
+  (if (slot-boundp x 'name)
+      (call-next-method)
+      (alias x)))
 
 (defmethod print-object ((instance smartos-zone) stream)
   (if (slot-boundp instance 'alias)
@@ -86,6 +101,9 @@
 
 ;; this is a component as well as a system (which will be very common)
 (defclass joyent-zone (smartos-zone solaris-host component) ())
+
+(defmethod brand ((j joyent-zone)) "joyent")
+
 (defclass lx-zone (smartos-zone unix-host component)
   ((type :initform "LX")))
 
@@ -177,11 +195,13 @@
   ;; recurse...
   (make-shell-command-for-host (access-from host)
                                "ssh"
-                               (list (if (slot-boundp host 'user)
-                                         (concatenate 'string
-                                                      (user host) "@" (name host))
-                                         (name host))
-                                     (make-shell-command command args))))
+                               `(,(if (slot-boundp host 'user)
+                                      (concatenate 'string
+                                                   (user host) "@" (name host))
+                                      (name host))
+                                 ,@ (when (slot-boundp host 'key)
+                                      (list :i (key host)))
+                                 ,(make-shell-command command args))))
 
 
 ;; (execute-command (make-instance 'sshd-host :name "liganc") "uname" :a :output :first-line)
