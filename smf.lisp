@@ -4,18 +4,49 @@
 ;; smf services have a concept of instances
 (defclass smf-service (service)
   ((instance :initform "default" :reader instance)
+   (fmri :initarg :fmri :accessor fmri)
    (enabled :initform t :reader enabled :initarg :enabled)
    (current-state :reader current-state)
-   (current-state-since :reader current-state-since)))
+   (current-state-since :reader current-state-since :initarg :current-state-since)))
 
 ;; check whether the service exists
+(defmethod existing-services :before ((host solaris-host))
+  (unless (slot-boundp host 'existing-services)
+    (setf (slot-value host 'existing-services)
+          (loop for line in (execute-command host
+                                            "svcs" '("-H" "-a")
+                                            :output :lines)
+                for bits = (cl-ppcre:split "\\s+" line)
+                collect (destructuring-bind (status since fmri)
+                            bits
+                          (make-instance 'smf-service
+                                         :enabled status
+                                         :current-state-since since
+                                         :fmri fmri
+                                         :name (cl-ppcre:regex-replace ":.*"
+                                                                       (cl-ppcre:regex-replace ".*/" fmri "")
+                                                                       "")))))))
 
-(defmethod exists-p ((svc smf-service)))
 
-;; I can't really create this
+;; It would be better to use the FMRI or the FMRI search facility, but this will suffice for the mo
+;; !!! It would be good to get service properties instead of getting all existing services
+;; (although this will speed up adding >1 service)
+(defmethod exists-p ((svc smf-service))
+  (if (slot-boundp svc 'fmri)
+      (find (fmri svc)
+            (existing-services (host svc))
+            :test #'equal :key #'fmri)
+      (let ((found (find (name svc)
+                         (existing-services (host svc))
+                         :test #'equal :key #'name)))
+        (when found
+          (setf (fmri svc)
+                (fmri found))))))
 
-(defmethod fmri ((x smf-service))
-  (concatenate 'string (name x) ":" (instance x)))
+(defmethod fmri :before ((svc smf-service))
+  (unless (slot-boundp svc 'fmri)
+    ;; if we try and find it we should get the FMRI if possible
+    (exists-p svc)))
 
 ;; this is helpful if we want to examine the service log
 (defmethod service-log ((x smf-service))
@@ -66,21 +97,208 @@
                        `((enable ,svc)
                          (check ,svc))))))))
 
+;; I don't know how this will happen in general unless something else has changed
+;; it WOULD work with the gc-monitor though
+(defmethod clear ((svc smf-service))
+  (execute-command (host svc)
+                   "svcadm"
+                   (list "clear" (fmri svc))))
 
-;; one that I define
-(defclass custom-smf-service (smf-service system)
-  ((manifest :initarg :manifest :reader manifest)
-   (control-script)
-   (subcomponents)))
+(defmethod check ((svc smf-service))
+  (slot-makunbound svc 'current-state)
 
-;; subcomponents will include the manifest file and control script as well as the other things
-(defmethod subcomponents ((x custom-smf-service))
-  (append (list (make-instance 'fs-file :full-path
-                               :content (manifest x))
-                )))
+  ;; give it chance to start up
+  (loop for current = (current-state svc)
+        while (equal current "offline*")
+        do (slot-makunbound svc 'current-state)
+           (format t "Waiting for service to transition from offline* state...~%")
+        (sleep 1))
+  
+  (let ((current (current-state svc)))
+    (when (equal current "maintenance")
+      (error (tail (service-log svc))))))
+
+(defmethod enable ((svc smf-service))
+  (execute-command (host svc)
+                   "svcadm"
+                   (list "enable" (fmri svc))))
+
 
 ;; I can create this custom one though
 ;; the way of creating might be slightly different between SmartOS GZ and normal Solaris system
 ;; or it might not
 
+
+
+
+;; What do we need to get this online?
+(defclass custom-smf-service (system smf-service)
+  ((start-command :initarg :start-command :reader start-command)
+
+   ;; the good thing is that because all these properties are just used to generate the script and manifest files
+   ;; we don't have to handle change detection - the subcomponents will be those files and they will either match or not
+   ;; this might be needed in smf-service
+   (instances :initform '("default") :initarg :instances :reader instances)
+   ;; maybe these things should be better modelled
+   (dependencies :initform '(("network" "svc:/milestone/network:default")
+                             ("filesystem-local" "svc:/system/filesystem/local:default"))
+                 :reader dependencies)
+   ;; extra properties etc
+   ;; (which can be picked up by run scripts)
+   ))
+
+;; (make-instance 'custom-smf-service)
+
+(defmethod subcomponents ((svc custom-smf-service))
+  (mapcar (lambda (child)
+            (adopt svc child))
+          (list (service-method svc)
+                (service-manifest svc))))
+
+;; if the subcomponents (manifest, script etc) have changed then we have to rebuild
+;; that does mean destroying and rebuilding the service which might not always be a Good Idea
+;; I might revisit this, or change it in subclasses of this
+(defmethod requires-rebuild-p ((svc custom-smf-service))
+  (reduce #'append
+          (mapcar #'update-plan
+                  (subcomponents svc))))
+
+
+;; if you want instance properties then subclass this to return some XML - I may find a better way later
+(defmethod instance-properties ((svc custom-smf-service) instance)
+  (declare (ignore instance))
+  nil)
+
+
+(defmethod service-method ((svc custom-smf-service))
+  (make-instance 'fs-file :full-path (format nil "/opt/local/lib/svc/method/~A"
+                                             (name svc))
+                          :permissions #o555
+                          :content (concatenate 'string
+                                                "#!/sbin/sh
+#
+
+. /lib/svc/share/ipf_include.sh
+. /lib/svc/share/smf_include.sh
+
+# I don't need to use this in this script here - I've put it in the CL startup code (see start.lisp)
+getproparg() {
+   val=`svcprop -p $1 $SMF_FMRI`
+   [ -n \"$val\" ] && echo $val
+}
+
+# 
+INSTANCE=`echo $SMF_FMRI|sed 's/.*://'`
+PIDFILE=/var/run/" (name svc) ".pid
+
+case $1 in 
+        # SMF arguments (start and restart [really \"refresh\"])
+
+
+'start')
+        " (start-command svc) "
+        ;;
+
+'restart')
+        if [ -f \"$PIDFILE\" ]; then
+                /usr/bin/kill -HUP `/usr/bin/cat $PIDFILE`
+        fi
+        ;;
+        
+
+esac	
+
+exit $?
+
+
+")
+                 ))
+
+(defmethod manifest-file-name ((svc custom-smf-service))
+  (format nil "/opt/local/lib/svc/manifest/~A.xml"
+          (name svc)))
+
+(defmethod service-manifest ((svc custom-smf-service))
+  (make-instance
+   'fs-file
+   :full-path (manifest-file-name svc)
+   :permissions #o555
+   :content
+   ;; I should use an XML generator here really
+   ;; I should also make dependencies explicity. Really it would be good to properly generate this file and look at the whole config
+   (concatenate 'string
+                "<?xml version=\"1.0\"?>
+<!DOCTYPE service_bundle SYSTEM \"/usr/share/lib/xml/dtd/service_bundle.dtd.1\">"
+                (xmls:toxml
+                 `("service_bundle"
+                   (("type" "manifest")
+                    ("name" ,(concatenate 'string
+                                          "application/"
+                                          (name svc))))
+                   ("service" (("name" ,(name svc))
+                               ("type" "service")
+                               ("version" "1"))
+                              ,@ (mapcar (lambda (dep)
+                                           ;; for now I'm just putting these in like this
+                                           (destructuring-bind (name fmri)
+                                               dep
+                                             `("dependency" (("type" "service")
+                                                             ("restart_on" "none")
+                                                             ("grouping" "require_all")
+                                                             ("name" ,name))
+                                                            ("service_fmri" (("value" ,fmri))))))
+                                         (dependencies svc))
+                                 ;; these could all be parameterised
+                              ("exec_method" (("timeout_seconds" "60")
+                                              ("exec" ,(format nil "/opt/local/lib/svc/method/~A start"
+                                                               (name svc)))
+                                              ("name" "start")
+                                              ("type" "method")))
+
+                              ("exec_method" (("timeout_seconds" "60")
+                                              ("exec" ,(format nil "/opt/local/lib/svc/method/~A restart"
+                                                               (name svc)))
+                                              ("name" "refresh")
+                                              ("type" "method")))
+
+                              ("exec_method" (("timeout_seconds" "60")
+                                              ("exec" ":kill")
+                                              ("name" "stop")
+                                              ("type" "method")))
+
+                              ;; now create the service instances
+                              ;; Ideally we should be able to control whether each is enabled or not...
+                              ,@ (mapcar (lambda (instance)
+                                           `("instance" (("enabled" "true")
+                                                         ("name" ,instance))))
+                                         (instances svc))
+
+                              ("template" nil
+                                          ("common_name" nil
+                                                         ("loctext" (("xml:lang" "C"))
+                                                                    ,(name svc))))))))))
+
+;; I'm overriding this to create the subcomponents FIRST as opposed to the usual order
+(defmethod create-plan ((svc custom-smf-service))
+  (append (reduce #'append
+                  (mapcar #'create-plan (subcomponents svc)))
+          `((create ,svc))))
+
+;; as soon as it is imported it should start right up
+(defmethod create ((svc custom-smf-service))
+  (execute-command (host svc)
+                   "svccfg"
+                   (list "import"
+                         (manifest-file-name svc)))
+  (slot-makunbound (host svc) 'existing-services)
+  (check svc))
+
+;; https://blogs.oracle.com/solaris/changes-to-svccfg-import-and-delete says I shouldn't use svccfg delete
+;; but I'm not sure if that's applicable to SmartOS. It seems to work anyway
+(defmethod destroy ((svc custom-smf-service))
+  (execute-command (host svc)
+                   "svccfg"
+                   (list "delete"
+                         :f ; forcibly so we can delete online services. This is a bit harsh - would be better not to do this
+                         (fmri svc))))
 

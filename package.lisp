@@ -10,3 +10,7 @@
    #:fs-directory
    #:fs-file
    ))
+
+;; I'm just using this for json generation to avoid name conflicts...
+(defpackage :vmadm)
+

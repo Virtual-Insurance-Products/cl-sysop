@@ -11,16 +11,14 @@
   ((subcomponents :initarg :subcomponents :initform nil :reader subcomponents)
    ;; this is used to cache the list of installed packages
    ;; it will be cleared before the plan phase
-   (installed-packages :reader installed-packages)))
+   (installed-packages :accessor installed-packages)
+   (existing-services :accessor existing-services)))
 
 (defmethod update-plan :before ((host unix-host) &optional without)
   (declare (ignore without))
-  (slot-makunbound host 'installed-packages))
+  (slot-makunbound host 'installed-packages)
+  (slot-makunbound host 'existing-services))
 
-(defmethod subcomponents ((x unix-host))
-  (append (filesystem-content x)
-          ;; services? I guess so
-          ))
 
 ;; shall we just assume this will always be running on a unix host?
 (defclass localhost (unix-host)
@@ -66,25 +64,37 @@
   (declare (ignore without))
   (slot-makunbound host 'vms))
 
+;; For stuff we can convert into a json description
+(defclass vmadm-json-object () ())
+
+(deftype object-list () 'list)
+
 ;; general properties of a zone - there are lots more
 ;; 
-(defclass smartos-zone (component)
+(defclass smartos-zone (component vmadm-json-object)
   ;; uuid will probably be pulled into a superclass
-  ((uuid :reader uuid)
-   type ram
+  ((vmadm::uuid :reader uuid)
+   vmadm::type
+   vmadm::ram
    ;; desired state
-   (state :initform "running" :initarg :state :reader state)
-   (alias :reader alias :initarg :alias)
-   customer_metadata.source_uuid
-   (image_uuid :initarg :image-uuid :reader image-uuid)
+   (vmadm::state :initform "running" :initarg :state :reader state)
+   (vmadm::alias :reader alias :initarg :alias)
+   vmadm::customer_metadata.source_uuid
+   (vmadm::image_uuid :initarg :image-uuid :reader image-uuid)
 
-   (max_physical_memory :reader max-physical-memory :initarg :max-physical-memory :initform 256)
-   (quota :initform 0 :initarg :quote :reader quota)
-   (resolvers :initform (list "8.8.8.8" "8.8.4.4") :initarg :resolvers :reader resolvers)
+   (vmadm::max_physical_memory :accessor max-physical-memory :initarg :max-physical-memory :initform 256)
+   (vmadm::quota :initform 0 :initarg :quote :reader quota)
+   (vmadm::resolvers :initform (list "8.8.8.8" "8.8.4.4") :initarg :resolvers :reader resolvers)
 
-   (nics :initarg :nics :reader nics)
+   (vmadm::nics :initarg :nics :reader nics :type object-list)
+
+   (current-specification :reader current-specification)
    
    ))
+
+(defmethod update-plan :before ((host smartos-zone) &optional without)
+  (declare (ignore without))
+  (slot-makunbound host 'current-specification))
 
 (defmethod name ((x smartos-zone))
   (if (slot-boundp x 'name)
@@ -92,7 +102,7 @@
       (alias x)))
 
 (defmethod print-object ((instance smartos-zone) stream)
-  (if (slot-boundp instance 'alias)
+  (if (slot-boundp instance 'vmadm::alias)
       (print-unreadable-object (instance stream)
         (let* ((class (class-of instance))
                (class-name (class-name class)))

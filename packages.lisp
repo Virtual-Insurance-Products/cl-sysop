@@ -11,7 +11,7 @@
 
 ;; now we'll have subclasses
 (defclass pkgin-package (software-package)
-  ())
+  ((description :initarg :description)))
 
 (defclass brew-package (software-package)
   ())
@@ -79,6 +79,14 @@
         (installed-packages (host package))
         :test #'equal :key #'name))
 
+(defmethod exists-p ((package pkgin-package))
+  (find (name package)
+        (installed-packages (host package))
+        :test (lambda (n a)
+                (cl-ppcre:scan (format nil "~A-.*" n)
+                               a))
+        :key #'name))
+
 ;; this is basically just giving the create verb
 (defmethod create-plan ((package software-package))
   `((install ,package)))
@@ -111,3 +119,8 @@
   (execute-command (host package)
                    "brew"
                    (list "uninstall" (name package))))
+
+
+(defmethod install ((package pkgin-package))
+  (execute-command (host package)
+                   "pkgin" (list :y "in" (name package))))

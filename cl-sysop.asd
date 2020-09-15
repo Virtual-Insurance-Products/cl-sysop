@@ -3,7 +3,7 @@
   :description "System Operations"
   :author "VIP"
   :license "vip"
-  :depends-on ("cl-ppcre" "anaphors" "diff" "vip-utils" "cl-json")
+  :depends-on ("cl-ppcre" "anaphors" "diff" "vip-utils" "cl-json" "xmls")
   :serial t
   ;; would be good to put proper deps in
   :components ((:file "package")
