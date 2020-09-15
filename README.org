@@ -136,3 +136,13 @@ automate that.
 
 I think this is all looking very much inline with the vague idea I had
 for Red Queen. 
+
+* More Features
+** OpenBSD services and pf
+** set up tor hidden services
+Eg hidden websites on tor. 
+
+https://news.ycombinator.com/item?id=24474309
+
+** Raspberry Pi config
+For installing consul for example. 
