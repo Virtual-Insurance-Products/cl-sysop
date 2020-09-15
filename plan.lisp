@@ -64,21 +64,35 @@
 
 ;; This is quite vague
 ;; the plan ought to be more detailed than this
-(defmethod update-plan ((x component) &optional without)
+(defmethod update-plan :around ((x component) &optional without)
   (if without
       (when (exists-p x)
         (append (destroy-plan x)
+                (create-plan x)
                 (call-next-method)))
       (if (exists-p x)
           (if (requires-rebuild-p x)
               ;; FIXME - destroy subcomponents first if required, but it might not be
               (append (destroy-plan x)
-                      (call-next-method))
+                      (create-plan x))
               ;; otherwise we make the create plan
               (call-next-method))
-          (append (create-plan x)
-                  (call-next-method)))))
+          (create-plan x))))
 
+(defmethod destroy-plan ((c component))
+  `((destroy ,c)))
+
+;; If it doesn't exist there isn't anything to do
+(defmethod destroy-plan :around ((c component))
+  (if (exists-p c)
+      (call-next-method)
+      nil))
+
+(defmethod destroy-plan ((s system))
+  (append (reduce #'append
+                  (mapcar #'destroy-plan
+                          (subcomponents s)))
+          (call-next-method)))
 
 ;; if there is more that needs doing then obviously we have to define a new method for the particular system
 (defmethod create ((s system))
@@ -112,7 +126,10 @@
       (apply-changes ()
         :report "Execute the plan to apply changes"
         (loop for (op . args) in plan
-              do (apply op args))))))
+              do (if (eq op 'setf)
+                     (funcall (fdefinition `(setf ,(first (first args))))
+                              (second args) (second (first args)))
+                     (apply op args)))))))
 
 ;; then we can use the above and just provide something to invoke the condition handler
 
