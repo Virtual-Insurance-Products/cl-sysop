@@ -6,9 +6,6 @@
    (existing-content :reader existing-content)))
 
 
-(defmethod destroy-plan ((x fs-object))
-  `((destroy ,x)))
-
 ;; if I make changing file content use patch and diff it will make it clearer what the actual change is
 ;; that will be really useful for seeing what I manually hacked!
 (defclass fs-file (fs-object)
@@ -16,7 +13,7 @@
    ;; you can supply sha1 hash and/or content, though we won't be able to fix a missing file without the content from somewhere
    ;; without supplying either we're just asking for the file to exist
    (sha1-hash :initarg :sha1-hash :reader sha1-hash :type string)
-   (permissions :initarg :permissions)
+   (permissions :initarg :permissions :reader permissions)
    (owner)
    (group)))
 
@@ -35,6 +32,12 @@
 ;; I'm only giving this op a different name to distinguish it
 (defmethod update-file-content ((file fs-file))
   (create file))
+
+(defmethod create-plan ((file fs-file))
+  (if (slot-boundp file 'permissions)
+      (append (call-next-method)
+              `((chmod ,file)))
+      (call-next-method)))
 
 (defmethod update-plan ((file fs-file) &optional without)
   (if without
@@ -158,6 +161,11 @@
   (execute-command (host x)
                    "cat" `((> ,(full-path x)))
                    :input (content x)))
+
+(defmethod chmod ((x fs-file))
+  (execute-command (host x)
+                   "chmod" (list (format nil "~O" (permissions x))
+                                 (full-path x))))
 
 (defmethod destroy ((x fs-file))
   (execute-command (host x)
