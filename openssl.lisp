@@ -14,7 +14,7 @@
 (defun make-rsa-certificate (private-key &key (days 1024)
                                            (country "GB")
                                            (state "DV")
-                                           (org "VIP")
+                                           (org "ACME")
                                            (common-name "example.com"))
   (execute-command (localhost)
                    "openssl"
@@ -80,3 +80,102 @@
     (values key (sign-certificate-request csr ca ca-key))))
 
 ;; (signed-host-key *ca* *ca-key* :common-name "bwdangi.local")
+
+
+;; this will solve our rekeying problem - we won't recreate an existing cert if it's valid with the CA given
+;; If no CA key is given then creation is not possible
+
+;; NOW let's make a subclass of fs-file for storing certificates
+(defclass rsa-certificate-pair (system fs-object)
+  ((certificate-authority :initarg :certificate-authority
+                          :initarg :ca
+                          :reader certificate-authority)
+   (certificate-authority-key :initarg :certificate-authority-key
+                              :initarg :ca-key
+                              :reader certificate-authority-key)
+   (files :accessor subcomponents)
+   (common-name :initarg :common-name :reader common-name)
+   ))
+
+(defmethod adopt :after ((parent rsa-certificate-pair) (part fs-file))
+  (when (slot-boundp parent 'full-path)
+    (setf (full-path part)
+          (concatenate 'string
+                       (full-path parent)
+                       "." (name part)))))
+
+(defmethod (setf full-path) :after (value (pair rsa-certificate-pair))
+  (declare (ignore value))
+  (dolist (c (subcomponents pair))
+    (adopt pair c)))
+
+(defmethod subcomponents :before ((pair rsa-certificate-pair))
+  (unless (slot-boundp pair 'files)
+    (setf (subcomponents pair)
+          (list (make-instance 'fs-file
+                               :name "cert")
+                (make-instance 'fs-file
+                               :name "key"
+                               :permissions #o600)))))
+
+;; This makes exclude-others recognize the components of this pair
+(defmethod component-p ((a fs-file) (pair rsa-certificate-pair))
+  (find a (subcomponents pair) :test #'component-p))
+
+;; check that the 2 components exist
+(defmethod exists-p ((pair rsa-certificate-pair))
+  (not (member nil
+               (mapcar #'exists-p
+                       (subcomponents pair)))))
+
+(defmethod part ((pair rsa-certificate-pair) part)
+  (find (concatenate 'string (full-path pair)
+                     "." part)
+        (subcomponents pair)
+        :test #'equal :key #'full-path))
+
+(defmethod get-existing-field ((pair rsa-certificate-pair) &optional (field "CN"))
+  (second
+   (find field
+         (mapcar (lambda (x)
+                   (cl-ppcre:split "=" x))
+                 (cl-ppcre:split "\\/"
+                                 (execute-command (localhost)
+                                                  "openssl"
+                                                  (list "x509" :noout :subject
+                                                               :in (full-path (part pair "cert")))
+                                                  :output :first-line
+                                                  )))
+         :key 'first :test 'equal)))
+
+;; now we have to override the update plan because we don't want to check the file content
+(defmethod requires-rebuild-p ((pair rsa-certificate-pair))
+  ;; if the certificate is valid then it doesn't require rebuild, otherwise it does
+  ;; It would be a Very Good Idea to allow some grace time to rebuild the certificate
+  ;; !!! Need to do more verification, including checking the common name
+  (not (and (cl-ppcre:scan ": OK$"
+                           (or (ignore-errors
+                                (execute-command (host pair)
+                                                 "openssl"
+                                                 (list "verify" "-CAfile"
+                                                       "/dev/stdin"
+                                                       (full-path (part pair "cert")))
+                                                 :output :first-line
+                                                 :input (certificate-authority pair)))
+                               ""))
+            (equal (common-name pair)
+                   (get-existing-field pair "CN")))))
+
+;; Create the actual certificate in this method
+(defmethod create ((pair rsa-certificate-pair))
+  ;; we have to generate some file content
+  (multiple-value-bind (key cert)
+      (signed-host-key (certificate-authority pair)
+                       (certificate-authority-key pair)
+                       :common-name (common-name pair))
+    (setf (slot-value (part pair "cert") 'content) cert
+          (slot-value (part pair "key") 'content) key)))
+
+
+(defmethod destroy-plan ((pair rsa-certificate-pair))
+  (reduce #'append (mapcar #'destroy-plan (subcomponents pair))))

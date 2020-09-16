@@ -88,17 +88,20 @@
                                 (t (adopt dir (make-instance 'fs-file :name line))))))
       )))
 
+;; Is a the same component as b?
+(defmethod component-p ((a fs-object) (b fs-object))
+  (and (equal (full-path a)
+              (full-path b))
+       (subtypep (type-of a)
+                 (type-of b))))
+
 (defmethod update-plan ((dir fs-directory) &optional without)
   (unless without
     (if (exclude-others dir)
         (let ((existing (existing-content dir)))
           (append (reduce #'append
                           (loop for f in existing
-                                unless (find f (subcomponents dir) :test (lambda (a b)
-                                                                           (and (equal (full-path a)
-                                                                                       (full-path b))
-                                                                                (subtypep (type-of a)
-                                                                                          (type-of b)))))
+                                unless (find f (subcomponents dir) :test #'component-p)
                                   collect (destroy-plan f)))
                   (call-next-method)))
         (call-next-method))))
