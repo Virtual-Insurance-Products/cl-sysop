@@ -135,6 +135,7 @@
         :test #'equal :key #'full-path))
 
 (defmethod get-existing-field ((pair rsa-certificate-pair) &optional (field "CN"))
+  ;; For simplicity this retrieves the cert and processes it locally
   (second
    (find field
          (mapcar (lambda (x)
@@ -143,9 +144,9 @@
                                  (execute-command (localhost)
                                                   "openssl"
                                                   (list "x509" :noout :subject
-                                                               :in (full-path (part pair "cert")))
+                                                               :in "/dev/stdin")
                                                   :output :first-line
-                                                  )))
+                                                  :input (existing-content (part pair "cert")))))
          :key 'first :test 'equal)))
 
 ;; now we have to override the update plan because we don't want to check the file content
