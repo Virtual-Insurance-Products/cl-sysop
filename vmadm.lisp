@@ -142,7 +142,7 @@
           (let ((json:*json-symbols-package* (find-package "VMADM"))
                 (json:*json-identifier-name-to-lisp* #'string-upcase))
             (json:decode-json-from-string
-             (execute-command (liganc)
+             (execute-command (host vm)
                               "vmadm" (list "get" (uuid vm))))))))
 
 (defmethod requires-rebuild-p ((vm smartos-zone))
