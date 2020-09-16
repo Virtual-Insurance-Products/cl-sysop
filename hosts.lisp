@@ -82,7 +82,14 @@
    vmadm::customer_metadata.source_uuid
    (vmadm::image_uuid :initarg :image-uuid :reader image-uuid)
 
-   (vmadm::max_physical_memory :accessor max-physical-memory :initarg :max-physical-memory :initform 256)
+   (vmadm::max_physical_memory :accessor max-physical-memory :initarg :max-physical-memory
+                               ;; I don't know if it's useful to
+                               ;; default this - it'll make the thing
+                               ;; want to set it if we operate on
+                               ;; existing zones
+
+                               ;; :initform 256
+                               )
    (vmadm::quota :initform 0 :initarg :quote :reader quota)
    (vmadm::resolvers :initform (list "8.8.8.8" "8.8.4.4") :initarg :resolvers :reader resolvers)
 

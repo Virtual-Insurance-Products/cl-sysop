@@ -154,18 +154,22 @@
   ;; if the certificate is valid then it doesn't require rebuild, otherwise it does
   ;; It would be a Very Good Idea to allow some grace time to rebuild the certificate
   ;; !!! Need to do more verification, including checking the common name
-  (not (and (cl-ppcre:scan ": OK$"
-                           (or (ignore-errors
-                                (execute-command (host pair)
-                                                 "openssl"
-                                                 (list "verify" "-CAfile"
-                                                       "/dev/stdin"
-                                                       (full-path (part pair "cert")))
-                                                 :output :first-line
-                                                 :input (certificate-authority pair)))
-                               ""))
-            (equal (common-name pair)
-                   (get-existing-field pair "CN")))))
+  (with-temporary-resources
+      ((cert (temporary-file (existing-content (part pair "cert"))))
+       (ca (temporary-file (certificate-authority pair))))
+    (not (and (cl-ppcre:scan ": OK$"
+                             (or (ignore-errors
+                                  (execute-command (localhost)
+                                                   "openssl"
+                                                   (list "verify" "-CAfile"
+                                                         (full-path ca)
+                                                         (full-path cert))
+                                                   :output :first-line
+                                                   :input (certificate-authority pair)))
+                                 ""))
+              (equal (common-name pair)
+                     (get-existing-field pair "CN"))))))
+
 
 ;; Create the actual certificate in this method
 (defmethod create ((pair rsa-certificate-pair))
