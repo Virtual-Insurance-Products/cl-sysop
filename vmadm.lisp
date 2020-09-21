@@ -1,6 +1,8 @@
 
 (in-package :cl-sysop)
 
+;; !!! I haven't taken care of importing the images as needed in this. What to do? 
+
 ;; obviously there's a lot more information we could get here using
 (defmethod vms :before ((host smartos-host))
   (unless (slot-boundp host 'vms)

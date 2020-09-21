@@ -3,6 +3,8 @@
 
 ;; requires-rebuild-p
 
+(defgeneric component-exists-in-system-p (component system))
+
 ;; if it doesn't exist then we must create it
 ;; this is a general case, but won't always be the best way to determine this
 (defmethod exists-p ((x component))
@@ -33,13 +35,6 @@
                   (mapcar (lambda (c)
                             (update-plan c without))
                           (subcomponents system)))))
-
-(defmethod update-plan :around ((c component) &optional without)
-  (if without
-      (call-next-method)
-      (if (exists-p c)
-          (call-next-method)
-          (create-plan c))))
 
 ;; this recurses down passing without
 (defmethod update-plan ((system without) &optional without)

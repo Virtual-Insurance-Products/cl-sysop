@@ -146,3 +146,14 @@ https://news.ycombinator.com/item?id=24474309
 
 ** Raspberry Pi config
 For installing consul for example. 
+* Execution Engine
+It might be a very good idea to replace my shell execution gubbins
+with one of the following. 
+- https://github.com/fare/inferior-shell
+- https://github.com/deepfire/executor/
+
+This would give us portability, for one thing (if I use portable MOP
+instead of CCL MOP).
+
+I would have to be careful though, as my thing works quite well with
+error handling. 

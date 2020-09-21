@@ -32,7 +32,7 @@
 ;; this is a host we can SSH into to get a command shell
 (defclass sshd-host (unix-host)
   ((user :initarg :user :reader user)
-   (access-from :initarg :access-from :initform localhost :reader access-from)
+   (access-from :initarg :access-from :initform (localhost) :reader access-from)
    ;; allow specification of which key to use for which host.
    (key :initarg :key :reader key)))
 
@@ -74,6 +74,7 @@
 (defclass smartos-zone (component vmadm-json-object)
   ;; uuid will probably be pulled into a superclass
   ((vmadm::uuid :reader uuid)
+   vmadm::brand
    vmadm::type
    vmadm::ram
    ;; desired state
@@ -117,12 +118,13 @@
       (call-next-method)))
 
 ;; this is a component as well as a system (which will be very common)
-(defclass joyent-zone (smartos-zone solaris-host component) ())
-
-(defmethod brand ((j joyent-zone)) "joyent")
+(defclass joyent-zone (smartos-zone solaris-host component)
+  ((vmadm::brand :initform "joyent")))
 
 (defclass lx-zone (smartos-zone unix-host component)
-  ((type :initform "LX")))
+  ((vmadm::brand :initform "lx")
+   (vmadm::kernel_version :initform "3.13.0")))
+
 
 
 
