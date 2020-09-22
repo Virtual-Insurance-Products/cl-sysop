@@ -11,10 +11,12 @@
 ;; so that we can build them...
 (defclass docker-container (lx-zone)
   ((vmadm::docker :initform t)
+   (requires-rebuild-p :initarg :rebuild :reader requires-rebuild-p :initform nil)
    (docker-image :initarg :docker-image :reader docker-image)
    (docker-cmd :initarg :docker-cmd :reader docker-cmd
                ;; maybe this is useful and a convention?
-               :initform (list "/entrypoint.sh"))))
+               :initform (list "/entrypoint.sh")
+               )))
 
 ;; image-uuid is requested before generating the json spec
 (defmethod image-uuid ((vm docker-container))
@@ -39,8 +41,11 @@
 ;; before getting the json-spec we need to find the image-uuid of the requested docker image. 
 
 (defmethod json-spec ((vm docker-container))
-  (append (call-next-method)
-          `((:internal_metadata . ,(vip-utils:hash (list "docker:cmd"
-                                                         (docker-cmd vm)))))))
+  (if (slot-boundp vm 'docker-cmd)
+      (append (call-next-method)
+              `((:internal_metadata . ,(vip-utils:hash (list "docker:cmd"
+                                                             (json:encode-json-to-string (docker-cmd vm)))))))
+      (call-next-method)))
 
-
+(defun docker-volume (source target)
+  (smartos-filesystem source target))

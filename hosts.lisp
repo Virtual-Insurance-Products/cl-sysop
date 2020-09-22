@@ -94,8 +94,10 @@
    (vmadm::quota :initform 0 :initarg :quote :reader quota)
    (vmadm::resolvers :initform (list "8.8.8.8" "8.8.4.4") :initarg :resolvers :reader resolvers)
 
+   ;; I should define typed lists for this
    (vmadm::nics :initarg :nics :reader nics :type object-list)
-
+   (vmadm::filesystems :initarg :filesystems :reader filesystems :type object-list)
+   
    (current-specification :reader current-specification)
    
    ))
@@ -247,3 +249,15 @@
                                "zlogin"
                                (list (uuid host)
                                      (make-shell-command command args))))
+
+
+
+;; Maybe this pattern should be factored out somehow and I should be able to just enumerate commands
+;; or maybe there's another way
+;; like (host "uname") when I have a defun for the host as usual
+;; if the first argument is a string it could => execute-command
+;; or something else?
+(defmethod uname ((h unix-host) &optional all)
+  (execute-command h "uname"
+                   (when all "-a")
+                   :output :first-line))

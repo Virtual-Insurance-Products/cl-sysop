@@ -74,6 +74,17 @@
 (defun primary-nic (tag &rest options)
   (apply #'make-instance `(smartos-nic :tag ,tag ,@options)))
 
+
+(defclass smartos-filesystem (vmadm-json-object)
+  ((vmadm::type :initarg :type :initform "lofs" :reader type)
+   (vmadm::source :initarg :source :reader source :initform (error ":source is required"))
+   (vmadm::target :initarg :target :reader target :initform (error ":target is required"))))
+
+(defun smartos-filesystem (source target)
+  (make-instance 'smartos-filesystem
+                 :source source
+                 :target target))
+
 ;; !!! Pull this into a JSON serialisable or something
 ;; !!! Also, ip is actually deprecated
 (defmethod json-spec ((x vmadm-json-object))
