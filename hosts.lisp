@@ -24,17 +24,13 @@
 (defclass localhost (unix-host)
   ())
 
-;; Let's assume that unix hosts we talk about exist
-;; this won't be the case for solaris zones or DO droplets or other creatable things
-;; but since we can't create all kinds of host let's assume this by default
-(defmethod exists-p ((host unix-host)) t)
-
 ;; this is a host we can SSH into to get a command shell
 (defclass sshd-host (unix-host)
   ((user :initarg :user :reader user)
    (access-from :initarg :access-from :initform (localhost) :reader access-from)
    ;; allow specification of which key to use for which host.
-   (key :initarg :key :reader key)))
+   (key :initarg :key :reader key)
+   (use-login-shell-p :initarg :use-login-shell-p :initform nil :reader use-login-shell-p)))
 
 
 
@@ -57,7 +53,8 @@
 (defclass smartos-host (sshd-host solaris-global-zone)
   ;; these things without initargs or writers are read only properties for interrogating running systems
   ;; to specify that you WANT a vm to exist on a host just put it as one of the subcomponents
-  ((vms :reader vms)))
+  ((vms :reader vms))
+  (:default-initargs :use-login-shell-p t))
 
 ;; Clear the cached vms before starting to plan
 (defmethod update-plan :before ((host smartos-host) &optional without)
@@ -222,7 +219,11 @@
                                       (name host))
                                  ,@ (when (slot-boundp host 'key)
                                       (list :i (key host)))
-                                 ,(make-shell-command command args))))
+                                 ,(if (use-login-shell-p host)
+                                      (make-shell-command "bash"
+                                                          (list :l :c
+                                                                (make-shell-command command args)))
+                                      (make-shell-command command args)))))
 
 
 ;; (execute-command (make-instance 'sshd-host :name "liganc") "uname" :a :output :first-line)
