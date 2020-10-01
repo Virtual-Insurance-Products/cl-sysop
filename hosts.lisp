@@ -53,7 +53,8 @@
 (defclass smartos-host (sshd-host solaris-global-zone)
   ;; these things without initargs or writers are read only properties for interrogating running systems
   ;; to specify that you WANT a vm to exist on a host just put it as one of the subcomponents
-  ((vms :reader vms))
+  ((vms :reader vms)
+   (installed-images :accessor installed-images))
   (:default-initargs :use-login-shell-p t))
 
 ;; Clear the cached vms before starting to plan
@@ -68,19 +69,19 @@
 
 ;; general properties of a zone - there are lots more
 ;; 
-(defclass smartos-zone (component vmadm-json-object)
+(defclass smartos-zone (component json-object)
   ;; uuid will probably be pulled into a superclass
-  ((vmadm::uuid :reader uuid)
-   vmadm::brand
-   vmadm::type
-   vmadm::ram
+  ((json-property::uuid :reader uuid)
+   json-property::brand
+   json-property::type
+   json-property::ram
    ;; desired state
-   (vmadm::state :initform "running" :initarg :state :reader state)
-   (vmadm::alias :reader alias :initarg :alias)
-   vmadm::customer_metadata.source_uuid
-   (vmadm::image_uuid :initarg :image-uuid :reader image-uuid)
+   (json-property::state :initform "running" :initarg :state :reader state)
+   (json-property::alias :reader alias :initarg :alias)
+   json-property::customer_metadata.source_uuid
+   (json-property::image_uuid :initarg :image-uuid :reader image-uuid)
 
-   (vmadm::max_physical_memory :accessor max-physical-memory :initarg :max-physical-memory
+   (json-property::max_physical_memory :accessor max-physical-memory :initarg :max-physical-memory
                                ;; I don't know if it's useful to
                                ;; default this - it'll make the thing
                                ;; want to set it if we operate on
@@ -88,12 +89,12 @@
 
                                ;; :initform 256
                                )
-   (vmadm::quota :initform 0 :initarg :quote :reader quota)
-   (vmadm::resolvers :initform (list "8.8.8.8" "8.8.4.4") :initarg :resolvers :reader resolvers)
+   (json-property::quota :initform 0 :initarg :quote :reader quota)
+   (json-property::resolvers :initform (list "8.8.8.8" "8.8.4.4") :initarg :resolvers :reader resolvers)
 
    ;; I should define typed lists for this
-   (vmadm::nics :initarg :nics :reader nics :type object-list)
-   (vmadm::filesystems :initarg :filesystems :reader filesystems :type object-list)
+   (json-property::nics :initarg :nics :reader nics :type object-list)
+   (json-property::filesystems :initarg :filesystems :reader filesystems :type object-list)
    
    (current-specification :reader current-specification)
    
@@ -109,7 +110,7 @@
       (alias x)))
 
 (defmethod print-object ((instance smartos-zone) stream)
-  (if (slot-boundp instance 'vmadm::alias)
+  (if (slot-boundp instance 'json-property::alias)
       (print-unreadable-object (instance stream)
         (let* ((class (class-of instance))
                (class-name (class-name class)))
@@ -118,11 +119,11 @@
 
 ;; this is a component as well as a system (which will be very common)
 (defclass joyent-zone (smartos-zone solaris-host component)
-  ((vmadm::brand :initform "joyent")))
+  ((json-property::brand :initform "joyent")))
 
 (defclass lx-zone (smartos-zone unix-host component)
-  ((vmadm::brand :initform "lx")
-   (vmadm::kernel_version :initform "3.13.0")))
+  ((json-property::brand :initform "lx")
+   (json-property::kernel_version :initform "3.13.0")))
 
 
 

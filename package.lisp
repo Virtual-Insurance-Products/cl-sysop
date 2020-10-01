@@ -12,5 +12,6 @@
    ))
 
 ;; I'm just using this for json generation to avoid name conflicts...
-(defpackage :vmadm)
+(defpackage :json-property)
+
 

@@ -10,7 +10,7 @@
 ;; Although I'll be able to run docker containers on things OTHER THAN SmartOS, they need to inherit the properties of an lx zone
 ;; so that we can build them...
 (defclass docker-container (lx-zone)
-  ((vmadm::docker :initform t)
+  ((json-property::docker :initform t)
    (requires-rebuild-p :initarg :rebuild :reader requires-rebuild-p :initform nil)
    (docker-image :initarg :docker-image :reader docker-image)
    (docker-cmd :initarg :docker-cmd :reader docker-cmd
@@ -19,14 +19,29 @@
                )))
 
 ;; image-uuid is requested before generating the json spec
-(defmethod image-uuid ((vm docker-container))
-  (unless (slot-boundp vm 'vmadm::image_uuid)
-    (setf (slot-value vm 'vmadm::image_uuid)
+(defmethod image-uuid :before ((vm docker-container))
+  (unless (slot-boundp vm 'json-property::image_uuid)
+    (setf (slot-value vm 'json-property::image_uuid)
           (cdr (find :uuid (json:decode-json-from-string
                             (execute-command (host vm)
                                              "imgadm"
                                              (list "show" (docker-image vm))))
                      :key 'first)))))
+
+(defmethod create-plan ((vm docker-container))
+  (let ((next (loop for (a . r) in (call-next-method)
+                    collect (if (eq a 'import-image)
+                                (list 'import-image (first r) (docker-image vm))
+                                (cons a r)))))
+    
+    (if (find "https://docker.io"
+              (execute-command (host vm)
+                               "imgadm" "sources"
+                               :output :lines)
+              :test #'equal)
+        next
+        (append `((add-docker-hub ,(host vm)))
+                next))))
 
 ;; !!! Move to examples.lisp
 ;; This is looking good though

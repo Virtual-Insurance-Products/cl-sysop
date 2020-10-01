@@ -104,7 +104,7 @@ qHV5VVCoEIoYVHIuFIyFu1lIcei53VD6V690rmn0bp4A5hs+kErhThvkok3c
 
 ;; This could be moved elsewhere to a general downloading thing
 ;; It will probably be needed a lot
-(defun download (host url &optional destination-directory)
+(defun download (host url &key destination-directory check-certificate)
   (when (stringp destination-directory)
     (setf destination-directory
           (adopt host
@@ -114,7 +114,8 @@ qHV5VVCoEIoYVHIuFIyFu1lIcei53VD6V690rmn0bp4A5hs+kErhThvkok3c
   (execute-command host
                    "wget"
                    ;; We won't bother with certs. It won't matter since we'll verify downloads in a much better way
-                   `("--no-check-certificate"
+                   `(,@ (unless check-certificate
+                          `("--no-check-certificate"))
                      ,@ (when destination-directory
                           (list "-P" (full-path destination-directory)))
                      ,url))
@@ -203,7 +204,7 @@ qHV5VVCoEIoYVHIuFIyFu1lIcei53VD6V690rmn0bp4A5hs+kErhThvkok3c
         ((dir (temporary-directory nil host)))
       ;; maybe it would be good if this stuck the file into the directory object
       (flet ((fetch (what)
-               (download host what dir)))
+               (download host what :destination-directory dir)))
         (let* ((sums (fetch (hashicorp-release-file (name b) "SHA256SUMS")))
                (sig (fetch (hashicorp-release-file (name b) "\\.sig$")))
                (zip (fetch (hashicorp-platform-binary host (name b)))))
@@ -242,6 +243,13 @@ qHV5VVCoEIoYVHIuFIyFu1lIcei53VD6V690rmn0bp4A5hs+kErhThvkok3c
             (execute-command host
                              "shasum"
                              (list :a "256" :c (full-path sum-file))))
+
+          (ignore-errors (execute-command host
+                                          "rm"
+                                          (concatenate 'string
+                                                       (binary-installation-directory host)
+                                                       "/"
+                                                       (name b))))
           
           ;; if that was ok then we proceed to unzip
           (execute-command host
@@ -251,4 +259,21 @@ qHV5VVCoEIoYVHIuFIyFu1lIcei53VD6V690rmn0bp4A5hs+kErhThvkok3c
                             "-d" (binary-installation-directory host))))))))
 
 
-
+;; For generating configs for hashicorp stuff...
+;; !!! should I put brackets around it all?
+(defun alist-to-hcl-string (alist)
+  (with-output-to-string (stream)
+    (loop for (key . value) in alist
+          do (format stream "~(~A~) = ~A~%"
+                     (cl-ppcre:regex-replace-all "-" (symbol-name key) "_")
+                     (cond ((eql value t)
+                            "true")
+                           ((not value)
+                            "false")
+                           ((stringp value)
+                            (format nil "~S" value))
+                           ((listp value)
+                            (format nil "{~%~A}"
+                                    (alist-to-hcl-string value)))
+                           (t value))
+                     ))))

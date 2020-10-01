@@ -8,6 +8,7 @@
   ;; would be good to put proper deps in
   :components ((:file "package")
                (:file "core")
+               (:file "json")
                (:file "hosts")
                (:file "plan")
                (:file "packages")
@@ -18,4 +19,7 @@
                (:file "smf")
                (:file "vmadm")
                (:file "docker")
+               (:file "installed-binary")
+               (:file "hashicorp")
+               (:file "consul")
                ))

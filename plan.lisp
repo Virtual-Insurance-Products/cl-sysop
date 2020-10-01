@@ -10,6 +10,11 @@
 (defmethod exists-p ((x component))
   (component-exists-in-system-p x (parent x)))
 
+;; for a system we'll just assume it exists unless it has a method to determine otherwise
+;; that's because in general a system is made of components and really we want to know if THEY exist
+(defmethod exists-p ((x system))
+  t)
+
 ;; define a way to create the component. Again, a general case
 (defmethod create ((x component))
   (create-component-in-system x (parent x)))

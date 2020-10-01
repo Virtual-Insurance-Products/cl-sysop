@@ -89,12 +89,12 @@
 (defclass rsa-certificate-pair (system fs-object)
   ((certificate-authority :initarg :certificate-authority
                           :initarg :ca
-                          :reader certificate-authority)
+                          :accessor certificate-authority)
    (certificate-authority-key :initarg :certificate-authority-key
                               :initarg :ca-key
-                              :reader certificate-authority-key)
+                              :accessor certificate-authority-key)
    (files :accessor subcomponents)
-   (common-name :initarg :common-name :reader common-name)
+   (common-name :initarg :common-name :accessor common-name)
    ))
 
 (defmethod adopt :after ((parent rsa-certificate-pair) (part fs-file))

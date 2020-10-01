@@ -31,6 +31,10 @@
   (when (eq 'software-package (type-of child))
     (change-class child 'brew-package)))
 
+(defmethod adopt :after ((parent pkgin-host) (child software-package))
+  (when (eq 'software-package (type-of child))
+    (change-class child 'pkgin-package)))
+
 
 ;; examine state of installed packages on host
 ;; we will cache the whole package list on the host whilst we do this sort of thing

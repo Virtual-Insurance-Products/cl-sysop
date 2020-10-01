@@ -7,8 +7,8 @@
 (defmethod vms :before ((host smartos-host))
   (unless (slot-boundp host 'vms)
     (setf (slot-value host 'vms)
-          (let ((fields '(vmadm::uuid vmadm::type vmadm::ram vmadm::state vmadm::alias
-                          vmadm::customer_metadata.source_uuid vmadm::image_uuid
+          (let ((fields '(json-property::uuid json-property::type json-property::ram json-property::state json-property::alias
+                          json-property::customer_metadata.source_uuid json-property::image_uuid
                           )))
             (loop for line in (execute-command host
                                              "vmadm"
@@ -37,7 +37,7 @@
 
 ;; What if we specify 2 identifying slots to narrow it down? Don't know
 (defmethod find-zones ((host smartos-zone))
-  (loop for identifying-slot in '(vmadm::alias)
+  (loop for identifying-slot in '(json-property::alias)
         when (slot-boundp host identifying-slot)
           return (remove (slot-value host identifying-slot)
                          (vms (parent host))
@@ -52,53 +52,39 @@
     (first found)))
 
 (defmethod uuid :before ((host smartos-zone))
-  (unless (slot-boundp host 'vmadm::uuid)
+  (unless (slot-boundp host 'json-property::uuid)
     ;; we need a way to find the zone described
     ;; we will look for certain slots in order...
     (when (exists-p host)
-      (setf (slot-value host 'vmadm::uuid)
+      (setf (slot-value host 'json-property::uuid)
             (or (uuid (exists-p host))
                 (error "Zone not found ~A" host))))))
 
 (defparameter +base-64-feb-2020+ "ad6f47f2-c691-11ea-a6a5-cf0776f07bb7")
 
 ;; I should really just name these slots according to the json name
-(defclass smartos-nic (vmadm-json-object)
-  ((vmadm::nic_tag :initform "admin" :initarg :tag :reader tag)
-   (vmadm::netmask :initarg :netmask)
-   (vmadm::gateway :initarg :gateway)
-   (vmadm::ip :initarg :ip :reader ip-address :type (or string (eql :dhcp))
+(defclass smartos-nic (json-object)
+  ((json-property::nic_tag :initform "admin" :initarg :tag :reader tag)
+   (json-property::netmask :initarg :netmask)
+   (json-property::gateway :initarg :gateway)
+   (json-property::ip :initarg :ip :reader ip-address :type (or string (eql :dhcp))
               :initform :dhcp)
-   (vmadm::primary :initarg :primary)))
+   (json-property::primary :initarg :primary)))
 
 (defun primary-nic (tag &rest options)
   (apply #'make-instance `(smartos-nic :tag ,tag ,@options)))
 
 
-(defclass smartos-filesystem (vmadm-json-object)
-  ((vmadm::type :initarg :type :initform "lofs" :reader type)
-   (vmadm::source :initarg :source :reader source :initform (error ":source is required"))
-   (vmadm::target :initarg :target :reader target :initform (error ":target is required"))))
+(defclass smartos-filesystem (json-object)
+  ((json-property::type :initarg :type :initform "lofs" :reader type)
+   (json-property::source :initarg :source :reader source :initform (error ":source is required"))
+   (json-property::target :initarg :target :reader target :initform (error ":target is required"))))
 
 (defun smartos-filesystem (source target)
   (make-instance 'smartos-filesystem
                  :source source
                  :target target))
 
-;; !!! Pull this into a JSON serialisable or something
-;; !!! Also, ip is actually deprecated
-(defmethod json-spec ((x vmadm-json-object))
-  (loop for slot in (ccl:class-slots (class-of x))
-        for name = (ccl:slot-definition-name slot)
-        for value = (when (slot-boundp x name)
-                      (slot-value x name))
-        when (and (equal (package-name (symbol-package name)) "VMADM")
-                  (slot-boundp x name))
-          collect (cons name
-                        (if (eq (ccl:slot-definition-type slot)
-                                'object-list)
-                            (mapcar #'json-spec value)
-                            (slot-value x name)))))
 
 ;; (json:encode-json-to-string (json-spec (make-instance 'smartos-nic :primary t)))
 ;; (json:encode-json-to-string (json-spec (primary-nic "admin")))
@@ -120,6 +106,44 @@
 (defmethod create-plan :before ((vm smartos-zone))
   ;; just try and get this. It will fail if there are important missing things
   (json-spec vm))
+
+(defclass smartos-image (json-named)
+  ((json-property::uuid :initarg :uuid :reader uuid)))
+
+(defmethod add-docker-hub ((h smartos-host))
+  (execute-command h
+                   "imgadm"
+                   (list "sources" :t "docker" :a "https://docker.io")))
+
+(defmethod installed-images :before ((h smartos-host))
+  (unless (slot-boundp h 'installed-images)
+    (setf (installed-images h)
+          ;; The following will give a lot more information
+          ;; (json:decode-from-string (execute-command h "imgadm" (list "list" :j)))
+          (loop for (uuid name)
+                  in (mapcar (lambda (x)
+                               (cl-ppcre:split "\\s+" x))
+                             (execute-command h "imgadm"
+                                              (list "list" "-H" "-ouuid,name")
+                                              :output :lines))
+                ;; There ought to be a better way of collecting more information about these
+                collect (make-instance 'smartos-image
+                                       :uuid uuid
+                                       :name name)))))
+
+(defmethod import-image ((h smartos-host) (uuid string))
+  (execute-command h
+                   "imgadm"
+                   (list "import" uuid)))
+
+(defmethod create-plan ((vm smartos-zone))
+  (if (find (image-uuid vm)
+            (installed-images (host vm))
+            :key #'uuid
+            :test #'equal)
+      (call-next-method)
+      (append `((import-image ,(host vm) ,(image-uuid vm)))
+              (call-next-method))))
 
 (defmethod destroy ((vm smartos-zone))
   (execute-command (parent vm)
@@ -159,9 +183,9 @@
                               "vmadm" (list "get" (uuid vm))))))))
 
 (defmethod requires-rebuild-p ((vm smartos-zone))
-  (when (slot-boundp vm 'vmadm::image_uuid)
+  (when (slot-boundp vm 'json-property::image_uuid)
     (not (equal (image-uuid vm)
-                (cdr (assoc 'vmadm::image_uuid
+                (cdr (assoc 'json-property::image_uuid
                             (current-specification vm)))))))
 
 
@@ -174,9 +198,12 @@
 
 ;; we'll just lie about this
 ;; SO this has to be handled specially
-(defmethod vm-property-changed-p ((vm smartos-zone) (property (eql 'vmadm::nics)))
+(defmethod vm-property-changed-p ((vm smartos-zone) (property (eql 'json-property::nics)))
   nil)
 
+;; again - we need to work out if this has changed
+(defmethod vm-property-changed-p ((vm smartos-zone) (property (eql 'json-property::filesystems)))
+  nil)
 
 (defmethod update-plan ((vm smartos-zone) &optional without)
   (if without
@@ -211,6 +238,6 @@
   (execute-command (parent vm)
                    "vmadm" (list "update"
                                  (uuid vm))
-                   :input (json:encode-json-to-string (list (cons 'vmadm::max_physical_memory
+                   :input (json:encode-json-to-string (list (cons 'json-property::max_physical_memory
                                                                   new)))))
 

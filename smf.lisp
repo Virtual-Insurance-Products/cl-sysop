@@ -27,11 +27,7 @@
                                                                        (cl-ppcre:regex-replace ".*/" fmri "")
                                                                        "")))))))
 
-
-;; It would be better to use the FMRI or the FMRI search facility, but this will suffice for the mo
-;; !!! It would be good to get service properties instead of getting all existing services
-;; (although this will speed up adding >1 service)
-(defmethod exists-p ((svc smf-service))
+(defmethod smf-service-exists-p ((svc smf-service))
   (if (slot-boundp svc 'fmri)
       (find (fmri svc)
             (existing-services (host svc))
@@ -42,6 +38,12 @@
         (when found
           (setf (fmri svc)
                 (fmri found))))))
+
+;; It would be better to use the FMRI or the FMRI search facility, but this will suffice for the mo
+;; !!! It would be good to get service properties instead of getting all existing services
+;; (although this will speed up adding >1 service)
+(defmethod exists-p ((svc smf-service))
+  (smf-service-exists-p svc))
 
 (defmethod fmri :before ((svc smf-service))
   (unless (slot-boundp svc 'fmri)
@@ -123,6 +125,10 @@
                    "svcadm"
                    (list "enable" (fmri svc))))
 
+(defmethod restart ((svc smf-service))
+  (execute-command (host svc)
+                   "svcadm"
+                   (list "restart" (fmri svc))))
 
 ;; I can create this custom one though
 ;; the way of creating might be slightly different between SmartOS GZ and normal Solaris system
@@ -149,11 +155,16 @@
 
 ;; (make-instance 'custom-smf-service)
 
+;; !!! There must be a better way to stop the user of system's exists-p here. What though? 
+(defmethod exists-p ((svc custom-smf-service))
+  (smf-service-exists-p svc))
+
 (defmethod subcomponents ((svc custom-smf-service))
-  (mapcar (lambda (child)
-            (adopt svc child))
-          (list (service-method svc)
-                (service-manifest svc))))
+  (when (slot-boundp svc 'parent)
+    (mapcar (lambda (child)
+              (adopt svc child))
+            (list (service-method svc)
+                  (service-manifest svc)))))
 
 ;; if the subcomponents (manifest, script etc) have changed then we have to rebuild
 ;; that does mean destroying and rebuilding the service which might not always be a Good Idea
@@ -169,10 +180,15 @@
   (declare (ignore instance))
   nil)
 
+(defmethod custom-smf-path ((svc custom-smf-service) (host joyent-zone) (what (eql :method)))
+  (format nil "/opt/local/lib/svc/method/~A" (name svc)))
 
+(defmethod custom-smf-path ((svc custom-smf-service) (host smartos-host) (what (eql :method)))
+  (format nil "/opt/custom/smf/~A" (name svc)))
+
+;; !!! FIXME - make this more betterer
 (defmethod service-method ((svc custom-smf-service))
-  (make-instance 'fs-file :full-path (format nil "/opt/local/lib/svc/method/~A"
-                                             (name svc))
+  (make-instance 'fs-file :full-path (custom-smf-path svc (host svc) :method)
                           :permissions #o555
                           :content (concatenate 'string
                                                 "#!/sbin/sh
@@ -181,7 +197,6 @@
 . /lib/svc/share/ipf_include.sh
 . /lib/svc/share/smf_include.sh
 
-# I don't need to use this in this script here - I've put it in the CL startup code (see start.lisp)
 getproparg() {
    val=`svcprop -p $1 $SMF_FMRI`
    [ -n \"$val\" ] && echo $val
@@ -196,7 +211,7 @@ case $1 in
 
 
 'start')
-        " (start-command svc) "
+        " (start-command svc) " &
         ;;
 
 'restart')
@@ -214,14 +229,19 @@ exit $?
 ")
                  ))
 
-(defmethod manifest-file-name ((svc custom-smf-service))
-  (format nil "/opt/local/lib/svc/manifest/~A.xml"
-          (name svc)))
+
+
+(defmethod custom-smf-path ((svc custom-smf-service) (host joyent-zone) (what (eql :manifest)))
+  (format nil "/opt/local/lib/svc/manifest/~A.xml" (name svc)))
+
+(defmethod custom-smf-path ((svc custom-smf-service) (host smartos-host) (what (eql :manifest)))
+  (format nil "/opt/custom/smf/~A.xml" (name svc)))
+
 
 (defmethod service-manifest ((svc custom-smf-service))
   (make-instance
    'fs-file
-   :full-path (manifest-file-name svc)
+   :full-path (custom-smf-path svc (host svc) :manifest)
    :permissions #o555
    :content
    ;; I should use an XML generator here really
@@ -250,14 +270,14 @@ exit $?
                                          (dependencies svc))
                                  ;; these could all be parameterised
                               ("exec_method" (("timeout_seconds" "60")
-                                              ("exec" ,(format nil "/opt/local/lib/svc/method/~A start"
-                                                               (name svc)))
+                                              ("exec" ,(format nil "~A start"
+                                                               (custom-smf-path svc (host svc) :method)))
                                               ("name" "start")
                                               ("type" "method")))
 
                               ("exec_method" (("timeout_seconds" "60")
-                                              ("exec" ,(format nil "/opt/local/lib/svc/method/~A restart"
-                                                               (name svc)))
+                                              ("exec" ,(format nil "~A restart"
+                                                               (custom-smf-path svc (host svc) :method)))
                                               ("name" "refresh")
                                               ("type" "method")))
 
@@ -289,7 +309,7 @@ exit $?
   (execute-command (host svc)
                    "svccfg"
                    (list "import"
-                         (manifest-file-name svc)))
+                         (custom-smf-path svc (host svc) :manifest)))
   (slot-makunbound (host svc) 'existing-services)
   (check svc))
 

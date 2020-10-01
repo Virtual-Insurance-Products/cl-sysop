@@ -67,6 +67,10 @@
     (setf (name x)
           (first (last (cl-ppcre:split "/" (full-path x)))))))
 
+;; This is needed as otherwise the system #'exists-p will be called which assumes T
+(defmethod exists-p ((dir fs-directory))
+  (fs-object-exists-on-host dir (host dir)))
+
 (defmethod update-plan :before ((dir fs-directory) &optional without)
   (declare (ignore without))
   (slot-makunbound dir 'existing-content))
@@ -174,6 +178,11 @@
   (execute-command (host x)
                    "rm" (full-path x)))
 
+(defmethod destroy ((x fs-directory))
+  (execute-command (host x)
+                   "rm"
+                   (list "-rf" (full-path x))))
+
 
 (defmethod tail ((x fs-file) &key (lines 10) (output :string))
   (execute-command (host x)
@@ -189,4 +198,28 @@
                  (make-instance 'fs-file :content content
                                          :full-path (concatenate 'string "/tmp/"
                                                                  (vip-utils:random-string 20))))))
+
+(defun temporary-directory (content &optional (host (make-instance 'localhost :name "localhost")))
+  (create (adopt host
+                 (make-instance 'fs-directory :content content
+                                              :full-path (concatenate 'string "/tmp/"
+                                                                      (vip-utils:random-string 20))))))
+
+(defmacro in-temporary-directory (content &body forms)
+  (let ((dir (gensym "dir"))
+        (prev (gensym "prev")))
+    `(with-temporary-resources
+         ((,dir (temporary-directory ,content)))
+       (let ((,prev (ccl:current-directory)))
+         (ccl:cwd (full-path ,dir))
+         (unwind-protect
+              (progn
+                ,@forms)
+           (ccl:cwd ,prev))))))
+
+
+
+
+(defclass downloaded-file (fs-file)
+  ((source-url :initarg :source-url :reader source-url)))
 
