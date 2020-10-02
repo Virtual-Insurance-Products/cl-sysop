@@ -16,7 +16,12 @@
    (docker-cmd :initarg :docker-cmd :reader docker-cmd
                ;; maybe this is useful and a convention?
                :initform (list "/entrypoint.sh")
-               )))
+               )
+   (docker-environment-variables :initarg :docker-environment-variables
+                                 :initform nil
+                                 :reader docker-environment-variables
+                                 ;; Shall I make a type specifier for an alist?
+                                 :type alist)))
 
 ;; image-uuid is requested before generating the json spec
 (defmethod image-uuid :before ((vm docker-container))
@@ -56,11 +61,22 @@
 ;; before getting the json-spec we need to find the image-uuid of the requested docker image. 
 
 (defmethod json-spec ((vm docker-container))
-  (if (slot-boundp vm 'docker-cmd)
-      (append (call-next-method)
-              `((:internal_metadata . ,(vip-utils:hash (list "docker:cmd"
-                                                             (json:encode-json-to-string (docker-cmd vm)))))))
-      (call-next-method)))
+  (let ((internal-metadata (make-hash-table :test #'equal)))
+    (when (slot-boundp vm 'docker-cmd)
+      (setf (gethash "docker:cmd" internal-metadata)
+            (json:encode-json-to-string (docker-cmd vm))))
+
+    (when (docker-environment-variables vm)
+      (setf (gethash "docker:env" internal-metadata)
+            (json:encode-json-to-string
+             (loop for (key . value) in (docker-environment-variables vm)
+                   ;; What about quoting etc?
+                   collect (format nil "~A=~A" key value)))))
+
+    (if (vip-utils:hash-keys internal-metadata)
+        (append (call-next-method)
+                `((:internal_metadata . ,internal-metadata)))
+        (call-next-method))))
 
 (defun docker-volume (source target)
   (smartos-filesystem source target))
