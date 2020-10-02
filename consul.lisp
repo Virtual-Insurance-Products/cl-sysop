@@ -230,9 +230,12 @@
    (json-property::key_file :initarg :cert-file :initform "/opt/consul/server.key")
    (json-property::server :initform t)
    (json-property::advertise_addr :initarg :advertise-addr :type string)
+   (json-property::advertise_addr_wan :initarg :advertise-addr-wan :type string)
+   (json-property::retry_join_wan :initarg :retry-join-wan :type list)
    (json-property::primary_datacenter :initarg :primary-datacenter :type string
                                       :initform "dc1")
    (json-property::auto_encrypt :initform '((:allow_tls . t)))
+   (json-property::client_addr :initform "127.0.0.1" :initarg :client-addr)
    )
   (:default-initargs
    :verify-incoming t
@@ -317,15 +320,116 @@
 (defclass consul-service (json-named component)
   ((json-property::address :initarg :address :reader address :type string)
    (json-property::port :initarg :port :reader port :type (integer 1 65535))
-   (json-property::tags :initarg :tags :type list :reader tags)
+   (tags :initarg :tags :type list :reader tags)
    (json-property::check :initarg :check :type consul-service-check :reader check)
-   ))
+   (traefik-router :initarg :traefik-router :initarg :router
+                   :type traefik-router
+                   :initform nil :reader traefik-router)))
+
+
+(defmethod tags ((x consul-service))
+  (append (when (slot-boundp x 'tags)
+            (slot-value x 'tags))
+          (tag-strings (traefik-router x))))
 
 (defmethod json-spec ((s consul-service))
-  `((:service . ,(call-next-method))))
+  `((:service . ,(append (call-next-method)
+                         `((:tags . ,(tags s)))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Traefik router specification
+
+;; figuring out the syntax of these bits is a bit of a hassle, so I'm
+;; defining the structure of them here There are lots of options I
+;; could model. Don't know if I need all of them though.
+
+;; something provided to traefik from somewhere
+(defclass traefik-provided ()
+  ((provider :initarg :provider :reader provider
+             :type (member :file :consulcatalog))))
+
+;; Maybe I could abstract or generalise this. I just want to not have to remember Traefik config syntax
+(defclass traefik-tls-options (named traefik-provided)
+  ())
+
+(defun traefik-tls-options (name &optional provider)
+  (if provider
+      (make-instance 'traefik-tls-options :name name :provider provider)
+      (make-instance 'traefik-tls-options :name name)))
+
+;; (traefik-tls-options "mtls")
+;; (traefik-tls-options "mtls" :file)
+
+(defmethod print-object ((x traefik-tls-options) (s stream))
+  (write-sequence (name x) s)
+  (when (slot-boundp x 'provider)
+    (format s "@~(~A~)" (provider x))))
 
 
+;; This is not exhaustive
+(defparameter *traefik-selectors* `(host path path-prefix headers method))
 
+(defun traefik-rule-p (r)
+  (or (and (typep r `(cons (member ,@*traefik-selectors*)
+                           t))
+           (every #'stringp (cdr r)))
+      (and (typep r '(cons (member and or)
+                      t))
+           (every #'traefik-rule-p (cdr r)))))
+
+;; (traefik-rule-p `(and (host "consul.insurevip.co.uk") (or (path "/ui/") (path "/api/" "/foo/"))))
+
+(defun rule-string (rule)
+  (cond ((member (car rule) *traefik-selectors*)
+         (format nil "~A(~A)"
+                 (cl-ppcre:regex-replace-all "-" (string-capitalize (first rule)) "")
+                 (vip-utils:string-list (mapcar (lambda (x)
+                                                  (format nil "`~A`" x))
+                                                (cdr rule))
+                                        ", ")))
+        ((member (car rule) '(and or))
+         (format nil "(~A)"
+                 (vip-utils:string-list (mapcar #'rule-string (cdr rule))
+                                        (if (eq (car rule) 'and)
+                                            " && " " || "))))))
+
+
+;; (rule-string '(host "consul.insurevip.co.uk"))
+;; (rule-string '(path-prefix "consul.insurevip.co.uk" "blah"))
+;; (rule-string '(and (host "consul.insurevip.co.uk" "example.com") (path "/ui/")))
+
+(defclass traefik-router (named)
+  ((rule :initarg :rule :reader traefik-rule :type (satisfies traefik-rule-p))
+   (entrypoints :initarg :entrypoints :initform (list "websecure"))
+   ;; service is implied - it's whatever service this is inside
+   (cert-resolver :initarg :cert-resolver :reader cert-resolver)
+   (tls-options :initarg :tls-options :type traefik-tls-options :reader tls-options)))
+
+;; generate tags describing this router
+(defmethod tag-strings ((x traefik-router))
+  (remove nil
+          (list (format nil "traefik.http.routers.~A.rule=~A"
+                        (name x)
+                        (rule-string (traefik-rule x)))
+                (when (slot-boundp x 'tls-options)
+                  (format nil "traefik.http.routers.~A.tls.options=~A"
+                          (name x)
+                          (tls-options x)))
+                (when (slot-boundp x 'cert-resolver)
+                  (format nil "traefik.http.routers.~A.tls.certResolver=~A"
+                          (name x)
+                          (cert-resolver x))))))
+
+;; (tag-strings (make-instance 'traefik-router :rule '(host "consul.insurevip.co.uk") :name "consului"))
+
+(defun traefik-host-router (host)
+  (let ((name (first (cl-ppcre:split "\\." host))))
+    (make-instance 'traefik-router :name name
+                                   :rule `(host ,host)
+                                   ;; !!! This assumes that has been defined in the Traefik configuration
+                                   :cert-resolver "letsencrypt")))
 
 
 ;; ALERTING
