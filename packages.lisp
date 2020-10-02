@@ -127,4 +127,6 @@
 
 (defmethod install ((package pkgin-package))
   (execute-command (host package)
+                   "pkgin"(list :y "update"))
+  (execute-command (host package)
                    "pkgin" (list :y "in" (name package))))
