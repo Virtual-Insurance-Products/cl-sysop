@@ -99,6 +99,10 @@
                        `((enable ,svc)
                          (check ,svc))))))))
 
+(defmethod create-plan ((svc smf-service))
+  `((enable ,svc)
+    (check ,svc)))
+
 ;; I don't know how this will happen in general unless something else has changed
 ;; it WOULD work with the gc-monitor though
 (defmethod clear ((svc smf-service))
@@ -129,6 +133,11 @@
   (execute-command (host svc)
                    "svcadm"
                    (list "restart" (fmri svc))))
+
+(defmethod refresh ((svc smf-service))
+  (execute-command (host svc)
+                   "svcadm"
+                   (list "refresh" (fmri svc))))
 
 ;; I can create this custom one though
 ;; the way of creating might be slightly different between SmartOS GZ and normal Solaris system
