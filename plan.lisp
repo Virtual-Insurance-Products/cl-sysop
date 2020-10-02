@@ -96,8 +96,8 @@
 
 ;; if there is more that needs doing then obviously we have to define a new method for the particular system
 (defmethod create ((s system))
-  (dolist (c (subcomponents s))
-    (create c)))
+  ;; !!! I don't need to create the subcomponents here - the create-plan unfolds all of this
+  )
 
 ;; !!! Maybe I could make a component called (not) so that I can just negate any thing
 ;; then if it is installed we destroy it and vice versa
