@@ -160,6 +160,7 @@
 (defmethod create ((vm smartos-zone))
   ;; make sure this gets reloaded
   (slot-makunbound (parent vm) 'vms)
+  (format t "Creating VM with spec ~%~A~%" (json:encode-json-to-string (json-spec vm)))
   (execute-command (parent vm)
                    "vmadm"
                    "create"
@@ -185,7 +186,7 @@
 (defmethod requires-rebuild-p ((vm smartos-zone))
   (when (slot-boundp vm 'json-property::image_uuid)
     (not (equal (image-uuid vm)
-                (cdr (assoc 'json-property::image_uuid
+                (cdr (assoc 'image_uuid
                             (current-specification vm)))))))
 
 
