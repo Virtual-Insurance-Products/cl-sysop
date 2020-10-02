@@ -29,3 +29,14 @@
             `((:name . ,(name x))))
           (call-next-method)))
 
+(defun alist-p (list)
+  (or (not list)
+      (typep list
+             `(cons (cons t t)
+                    (satisfies alist-p)))))
+
+(deftype alist ()
+  `(satisfies alist-p))
+
+;; (typep '(1 2 3) 'alist)
+;; (typep '((a . 1) (b . 2)) 'alist)
