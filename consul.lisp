@@ -319,17 +319,17 @@
 (defclass consul-service (json-named component)
   ((json-property::address :initarg :address :reader address :type string)
    (json-property::port :initarg :port :reader port :type (integer 1 65535))
-   (tags :initarg :tags :type list :reader tags)
+   (tags :initarg :tags :type list)
    (json-property::check :initarg :check :type consul-service-check :reader check)
    (traefik-router :initarg :traefik-router :initarg :router
-                   :type traefik-router
-                   :initform nil :reader traefik-router)))
+                   :type traefik-router :reader traefik-router)))
 
 
 (defmethod tags ((x consul-service))
   (append (when (slot-boundp x 'tags)
             (slot-value x 'tags))
-          (tag-strings (traefik-router x))))
+          (when (slot-boundp x 'traefik-router)
+            (tag-strings (traefik-router x)))))
 
 (defmethod json-spec ((s consul-service))
   `((:service . ,(append (call-next-method)
