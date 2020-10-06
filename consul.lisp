@@ -232,8 +232,7 @@
    (json-property::advertise_addr :initarg :advertise-addr :type string)
    (json-property::advertise_addr_wan :initarg :advertise-addr-wan :type string)
    (json-property::retry_join_wan :initarg :retry-join-wan :type list)
-   (json-property::primary_datacenter :initarg :primary-datacenter :type string
-                                      :initform "dc1")
+   (json-property::primary_datacenter :initarg :primary-datacenter :type string)
    (json-property::auto_encrypt :initform '((:allow_tls . t)))
    (json-property::client_addr :initform "127.0.0.1" :initarg :client-addr)
    )
