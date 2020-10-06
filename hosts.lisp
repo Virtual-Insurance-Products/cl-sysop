@@ -71,7 +71,7 @@
 ;; 
 (defclass smartos-zone (component json-object)
   ;; uuid will probably be pulled into a superclass
-  ((json-property::uuid :reader uuid)
+  ((json-property::uuid :reader uuid :initarg :uuid)
    json-property::brand
    json-property::type
    json-property::ram
