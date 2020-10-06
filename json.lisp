@@ -4,6 +4,12 @@
 (defclass json-object ()
   ())
 
+(defclass json-false () ())
+(defmethod json:encode-json ((x json-false) &optional stream)
+  (princ "false" stream))
+
+(defparameter *json-false* (make-instance 'json-false))
+
 ;; !!! Pull this into a JSON serialisable or something
 ;; !!! Also, ip is actually deprecated
 (defmethod json-spec ((x json-object))
@@ -19,6 +25,7 @@
                                (mapcar #'json-spec value))
                               ((typep (slot-value x name) 'json-object)
                                (json-spec (slot-value x name)))
+                              ((not value) *json-false*)
                               (t (slot-value x name))))))
 
 (defclass json-named (json-object named)
