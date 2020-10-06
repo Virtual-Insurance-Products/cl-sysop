@@ -160,6 +160,7 @@
                  :reader dependencies)
    ;; extra properties etc
    ;; (which can be picked up by run scripts)
+   (method-variables :initarg :method-variables :initform nil :reader method-variables)
    ))
 
 ;; (make-instance 'custom-smf-service)
@@ -214,6 +215,10 @@ getproparg() {
 # 
 INSTANCE=`echo $SMF_FMRI|sed 's/.*://'`
 PIDFILE=/var/run/" (name svc) ".pid
+
+" (with-output-to-string (stream)
+    (loop for (name . value) in (method-variables svc)
+          do (format stream "~A=~S~%" (symbol-name name) value))) "
 
 case $1 in 
         # SMF arguments (start and restart [really \"refresh\"])
