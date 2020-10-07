@@ -368,7 +368,7 @@
 
 
 ;; This is not exhaustive
-(defparameter *traefik-selectors* `(host path path-prefix headers method))
+(defparameter *traefik-selectors* `(host path path-prefix headers method host-s-n-i))
 
 (defun traefik-rule-p (r)
   (or (and (typep r `(cons (member ,@*traefik-selectors*)
@@ -404,24 +404,36 @@
    (entrypoints :initarg :entrypoints :initform (list "websecure"))
    ;; service is implied - it's whatever service this is inside
    (cert-resolver :initarg :cert-resolver :reader cert-resolver)
-   (tls-options :initarg :tls-options :type traefik-tls-options :reader tls-options)))
+   (tls-options :initarg :tls-options :type traefik-tls-options :reader tls-options)
+   (tag-base :initform "traefik.http" :reader tag-base :initarg :tag-base)))
+
+(defclass traefik-tcp-router (traefik-router)
+  ()
+  (:default-initargs :tag-base "traefik.tcp"))
+
 
 ;; generate tags describing this router
+;; !!! Add in tcp router functionality
 (defmethod tag-strings ((x traefik-router))
   (remove nil
-          (list (format nil "traefik.http.routers.~A.rule=~A"
+          (list "traefik.enable=true"
+                (format nil "~A.routers.~A.rule=~A"
+                        (tag-base x)
                         (name x)
                         (rule-string (traefik-rule x)))
                 (when (slot-boundp x 'tls-options)
-                  (format nil "traefik.http.routers.~A.tls.options=~A"
+                  (format nil "~A.routers.~A.tls.options=~A"
+                          (tag-base x)
                           (name x)
                           (tls-options x)))
                 (when (slot-boundp x 'cert-resolver)
-                  (format nil "traefik.http.routers.~A.tls.certResolver=~A"
+                  (format nil "~A.routers.~A.tls.certResolver=~A"
+                          (tag-base x)
                           (name x)
                           (cert-resolver x))))))
 
 ;; (tag-strings (make-instance 'traefik-router :rule '(host "consul.insurevip.co.uk") :name "consului"))
+;; (tag-strings (make-instance 'traefik-tcp-router :rule '(host "consul.insurevip.co.uk") :name "consului"))
 
 (defun traefik-host-router (host)
   (let ((name (first (cl-ppcre:split "\\." host))))
@@ -429,6 +441,16 @@
                                    :rule `(host ,host)
                                    ;; !!! This assumes that has been defined in the Traefik configuration
                                    :cert-resolver "letsencrypt")))
+
+(defun traefik-tcp-router (host &key mtls)
+  (let ((name (first (cl-ppcre:split "\\." host))))
+    (make-instance 'traefik-tcp-router :name name
+                                       :rule `(host-s-n-i ,host)
+                                       :tls-options mtls
+                                       )))
+
+;; This isn't /quite/ right
+;; (tag-strings (traefik-tcp-router "foo.example.com"))
 
 
 ;; ALERTING
