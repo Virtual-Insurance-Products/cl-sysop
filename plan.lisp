@@ -125,11 +125,14 @@
                     (error 'updates-required :plan plan))
       (apply-changes ()
         :report "Execute the plan to apply changes"
-        (loop for (op . args) in plan
-              do (if (eq op 'setf)
-                     (funcall (fdefinition `(setf ,(first (first args))))
-                              (second args) (second (first args)))
-                     (apply op args)))))))
+        (let ((steps (length plan)))
+          (loop for (op . args) in plan
+                for step from 1
+                do (format t "STEP ~A/~A :: ~A~%" step steps (cons op args))
+                   (if (eq op 'setf)
+                       (funcall (fdefinition `(setf ,(first (first args))))
+                                (second args) (second (first args)))
+                       (apply op args))))))))
 
 ;; then we can use the above and just provide something to invoke the condition handler
 

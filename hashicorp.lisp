@@ -174,8 +174,11 @@ qHV5VVCoEIoYVHIuFIyFu1lIcei53VD6V690rmn0bp4A5hs+kErhThvkok3c
 ;; Just to make it explicit that we want to install 
 (defmethod create-plan ((b hashicorp-binary))
   (flet ((bin (n)
-           (update-plan (adopt (host b)
-                               (make-instance 'installed-binary :name n)))))
+           (let ((bin (adopt (host b)
+                             (make-instance 'installed-binary :name n))))
+             (if (exists-p (host b))
+                 (update-plan bin)
+                 (create-plan bin)))))
     ;; we have to install the following binaries if they aren't there already
     ;; For smartOS hosts we should also require pkgin to have been setup
     ;; I have a script which does all that elsewhere to use
@@ -184,7 +187,11 @@ qHV5VVCoEIoYVHIuFIyFu1lIcei53VD6V690rmn0bp4A5hs+kErhThvkok3c
     ;; Gradually this will turn into a very powerful thing for setting stuff up but will ONLY do the minimum needed
     ;; to get things running
     (append (bin "unzip")
-            (bin "gpg")
+            ;; These already have GPG installed and this will error
+            ;; in fact lots of hosts do
+            ;; This wouldn't be a problem if we could detect what is installed on a non existent host
+            (unless (typep (host b) 'solaris-host)
+              (bin "gpg"))
             `((install ,b)))))
 
 
