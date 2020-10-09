@@ -69,7 +69,9 @@
    (json-property::gateway :initarg :gateway)
    (json-property::ip :initarg :ip :reader ip-address :type (or string (eql :dhcp))
               :initform :dhcp)
-   (json-property::primary :initarg :primary)))
+   (json-property::primary :initarg :primary)
+   (json-property::allow_dhcp_spoofing :initarg :allow-dhcp-spoofing :type boolean)
+   (json-property::allow_ip_spoofing :initarg :allow-ip-spoofing :type boolean)))
 
 (defun primary-nic (tag &rest options)
   (apply #'make-instance `(smartos-nic :tag ,tag ,@options)))
