@@ -331,6 +331,9 @@ exit $?
 ;; but I'm not sure if that's applicable to SmartOS. It seems to work anyway
 (defmethod destroy ((svc custom-smf-service))
   (execute-command (host svc)
+                   "svcadm"
+                   (list "disable" (fmri svc)))
+  (execute-command (host svc)
                    "svccfg"
                    (list "delete"
                          :f ; forcibly so we can delete online services. This is a bit harsh - would be better not to do this
