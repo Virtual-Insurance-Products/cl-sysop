@@ -179,6 +179,15 @@
                                                      (json-spec service))))
                           (services s)))))
 
+;; Do I need to factor out the start command? Maybe pass the consul args instead
+(defmethod consul-service-for-host ((s consul-deployment) (host solaris-host) start-args)
+  (make-instance 'custom-smf-service
+                 :parent s
+                 :name "consul"
+                 :instances '("server")
+                 :start-command (concatenate 'string "/opt/local/bin/consul "
+                                             start-args)))
+
 (defmethod subcomponents ((s consul-deployment))
   (cons (binary s)
         (when (slot-boundp s 'parent)
@@ -192,14 +201,9 @@
                                                                :name "ca.pem"
                                                                :content (certificate (certificate-authority s)))
                                                 (consul-etc-directory s))))
-                  
-                (make-instance 'custom-smf-service
-                               :parent s
-                               :name "consul"
-                               :instances '("server")
-                               :start-command
-                               (format nil "/opt/local/bin/consul agent -config-dir=~S -ui"
-                                       (config-dir s)))))))
+                (consul-service-for-host s (host s)
+                                         (format nil "agent -config-dir=~S -ui"
+                                                 (config-dir s)))))))
 
 ;; ALSO, if I don't have unzip installed then I've got to add that to the update plan. That's ok
 (defmethod update-plan ((c consul-deployment) &optional without)
@@ -260,15 +264,10 @@
                                                                :datacenter (datacenter s)
                                                                :consul-ca (certificate-authority s))
                                                 (consul-etc-directory s))))
-                
-                (make-instance 'custom-smf-service
-                               :parent s
-                               :name "consul"
-                               :instances '("server")
-                               :start-command
-                               (format nil "/opt/local/bin/consul agent -bootstrap-expect=~A -config-dir=~S -ui"
-                                       (bootstrap-expect s)
-                                       (config-dir s)))))))
+                (consul-service-for-host s (host s)
+                                         (format nil "agent -bootstrap-expect=~A -config-dir=~S -ui"
+                                                 (bootstrap-expect s)
+                                                 (config-dir s)))))))
 
 (defmethod json-spec ((c consul-server))
   (append `((:auto_encrypt . ((:allow_tls . t)))
@@ -330,6 +329,13 @@
             (slot-value x 'tags))
           (when (slot-boundp x 'traefik-router)
             (tag-strings (traefik-router x)))))
+
+(defmethod tags-alist ((x consul-service))
+  (loop for tag in (tags x)
+        when (cl-ppcre:scan "=" tag)
+          collect (destructuring-bind (name value)
+                      (cl-ppcre:split "=" tag)
+                    (cons name value))))
 
 (defmethod json-spec ((s consul-service))
   `((:service . ,(append (call-next-method)
@@ -456,3 +462,22 @@
 ;; ALERTING
 
 ;; https://github.com/AcalephStorage/consul-alerts
+
+
+
+(defmethod consul-api-call ((x consul-deployment) url)
+  (let ((full-url (format nil "http://localhost:8500~A" url)))
+    (json:decode-json-from-string
+     (if (typep (host x) 'localhost)
+         (drakma:http-request full-url)
+         (execute-command (host x)
+                          "curl" full-url)))))
+
+;; Querying
+(defmethod catalog-services ((x consul-deployment) &key datacenter)
+  ;; I need to somehow generate the query URL from parameters
+  (loop for (name . tags) in (consul-api-call x "/v1/catalog/services")
+        ;; of course, adopting the service in this consul deployment isn't the right thing
+        collect (adopt x (make-instance 'consul-service :name (string-downcase name)
+                                                        :tags tags))))
+
