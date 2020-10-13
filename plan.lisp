@@ -128,7 +128,7 @@
         (let ((steps (length plan)))
           (loop for (op . args) in plan
                 for step from 1
-                do (format t "STEP ~A/~A :: ~A~%" step steps (cons op args))
+                do (format t "~%********************************************************************************~%STEP ~A/~A :: ~A~%" step steps (cons op args))
                    (if (eq op 'setf)
                        (funcall (fdefinition `(setf ,(first (first args))))
                                 (second args) (second (first args)))
