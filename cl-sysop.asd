@@ -22,5 +22,6 @@
                (:file "installed-binary")
                (:file "hashicorp")
                (:file "consul")
+               (:file "postgres-config")
                (:file "postgres")
                ))
