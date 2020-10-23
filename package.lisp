@@ -14,4 +14,4 @@
 ;; I'm just using this for json generation to avoid name conflicts...
 (defpackage :json-property)
 
-
+(defpackage :opt) ; another general package for config options
