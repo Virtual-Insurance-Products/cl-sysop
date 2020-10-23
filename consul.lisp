@@ -85,7 +85,7 @@
 
 ;; something which lives (notionally) in a consul dc
 (defclass consul-dc-component ()
-  ((json-property::datacenter :initarg :datacenter :initform "dc1" :reader datacenter)))
+  ((json-property::datacenter :initarg :datacenter :reader datacenter)))
 
 (defclass consul-certificate-pair (rsa-certificate-pair consul-dc-component)
   ((consul-ca :initarg :consul-ca :reader consul-ca)
@@ -133,7 +133,9 @@
 (defclass consul-deployment (named system component json-object consul-dc-component)
   ((binary :initform (make-instance 'hashicorp-binary :name "consul")
            :reader binary)
-   (config-dir :accessor config-dir :initform "/opt/consul/etc")
+   ;; putting the etc under /opt/consul is really a concession to SmartOS GZ setup
+   ;; I should put it elsewhere in the 'normal' case.
+   (config-dir :accessor config-dir :initform "/opt/consul/etc" :initarg :config-dir)
    (services :initarg :services :reader services :initform nil)
    (certificate-authority :initarg :certificate-authority :reader certificate-authority)
 
@@ -141,7 +143,9 @@
    (json-property::verify_incoming :initarg :verify-incoming :initform nil :reader verify-incoming)
    (json-property::verify_outgoing :initarg :verify-outgoing :initform t :reader verify-outgoing)
 
-   (json-property::encrypt :initarg :gossip-key :initform (error "Specify a gossip key generated with (make-gossip-key)"))
+   ;; !!! If we have a start-join then we could grab the gossip key from its config file if its accessible.
+   ;; or we could make that explicit - a consul node connected to that data center. 
+   (json-property::encrypt :initarg :gossip-key)
 
    (json-property::start_join :type list :initarg :start-join)
    ;; I don't know if I need this as well
@@ -152,7 +156,19 @@
 
    (json-property::bind_addr :initarg :bind-addr :type string)
    
-   (json-property::auto_encrypt :initform '((:tls . t)))))
+   (json-property::auto_encrypt :initform '((:tls . t)))
+
+   ;; I'll use this to cache the retrieved server configuration if needed
+   (consul-server-config :accessor consul-server-config)))
+
+(defmethod consul-server-config :before ((x consul-deployment))
+  (when (slot-boundp x 'parent)
+    (unless (slot-boundp x 'consul-server-config)
+      (setf (consul-server-config x)
+            (json:decode-json-from-string
+             (existing-content (adopt (parent (host x))
+                                      (make-instance 'fs-file 
+                                                     :full-path "/opt/consul/etc/_consul.json"))))))))
 
 
 
@@ -160,24 +176,29 @@
 
 
 (defmethod consul-etc-directory ((s consul-deployment))
-  (make-instance 'fs-directory
-                 :name "etc"
-                 :exclude-others t
-                 :content
-                 ;; !!! Add the service descriptions which are registered directly 
-                 (append
-                  (list (make-instance 'fs-file :name "_consul.json"
-                                                :content
-                                                (json:encode-json-to-string
-                                                 (json-spec s))))
-                  (mapcar (lambda (service)
-                            (make-instance 'fs-file
-                                           :name (concatenate 'string
-                                                              (name service)
-                                                              ".json")
-                                           :content (json:encode-json-to-string
-                                                     (json-spec service))))
-                          (services s)))))
+  (let ((dir (make-instance 'fs-directory
+                            :name "etc"
+                            :exclude-others t
+                            :content
+                            ;; !!! Add the service descriptions which are registered directly 
+                            (append
+                             (list (make-instance 'fs-file :name "_consul.json"
+                                                           :content
+                                                  (json:encode-json-to-string
+                                                   (json-spec s))))
+                             (mapcar (lambda (service)
+                                       (make-instance 'fs-file
+                                                      :name (concatenate 'string
+                                                                         (name service)
+                                                                         ".json")
+                                                      :content (json:encode-json-to-string
+                                                                (json-spec service))))
+                                     (services s))))))
+    (unless (equal (config-dir s)
+                   "/opt/consul/etc")
+      ;; set the full path of the etc directory
+      (setf (full-path dir) (config-dir s)))
+    dir))
 
 ;; Do I need to factor out the start command? Maybe pass the consul args instead
 (defmethod consul-service-for-host ((s consul-deployment) (host solaris-host) start-args)
@@ -191,19 +212,50 @@
 (defmethod subcomponents ((s consul-deployment))
   (cons (binary s)
         (when (slot-boundp s 'parent)
-          (list (adopt s
-                       (make-instance 'fs-directory
-                                      :full-path "/opt/consul"
-                                      :exclude-others t
-                                      :content (list
-                                                (make-instance 'fs-directory :name "data" :content nil)
-                                                (make-instance 'fs-file
-                                                               :name "ca.pem"
-                                                               :content (certificate (certificate-authority s)))
-                                                (consul-etc-directory s))))
-                (consul-service-for-host s (host s)
-                                         (format nil "agent -config-dir=~S -ui"
-                                                 (config-dir s)))))))
+          ;; if we're missing the CA and gossip key we'll try and get them from the host we're deploying onto...
+          (flet ((default-server-options (list)
+                   (loop for (key slot listp) in list
+                         unless (slot-boundp s slot)
+                           do (let ((value (cdr (assoc key (consul-server-config s)))))
+                                (setf (slot-value s slot)
+                                      (if listp (list value) value))))))
+
+            (default-server-options '((:encrypt json-property::encrypt)
+                                      (:datacenter json-property::datacenter)
+                                      (:advertise--addr json-property::start_join list))))
+          
+          (unless (slot-boundp s 'certificate-authority)
+            (setf (slot-value s 'certificate-authority)
+                  (make-instance 'consul-ca
+                                 :certificate (existing-content (adopt (parent (host s))
+                                                                       (make-instance 'fs-file 
+                                                                                      :full-path "/opt/consul/ca.pem"))))))
+          
+          
+          (let* ((etc (consul-etc-directory s))
+                 (full-path (slot-boundp etc 'full-path)))
+            (append
+             (when full-path
+               (list (adopt s etc)))
+             (list (adopt s
+                          (make-instance 'fs-directory
+                                         :full-path "/opt/consul"
+                                         :exclude-others t
+                                         :content (append
+                                                   (list
+                                                    (make-instance 'fs-directory :name "data" :content nil)
+                                                    (make-instance 'fs-file
+                                                                   :name "ca.pem"
+                                                                   :content (certificate (certificate-authority s))))
+                                                   ;; put it in here unless it says otherwise
+                                                   (unless full-path
+                                                     (list etc)))
+                                         ))
+                   (consul-service-for-host s (host s)
+                                            (format nil "agent -config-dir=~S -ui"
+                                                    (config-dir s)))))))))
+
+
 
 ;; ALSO, if I don't have unzip installed then I've got to add that to the update plan. That's ok
 (defmethod update-plan ((c consul-deployment) &optional without)
@@ -229,6 +281,8 @@
 (defclass consul-server (consul-deployment)
   ((bootstrap-expect :initarg :bootstrap-expect :initform 1 :reader bootstrap-expect)
    (name :initform "dc-server")
+
+   (json-property::encrypt :initarg :gossip-key :initform (error "Specify a gossip key generated with (make-gossip-key)"))
 
    (json-property::cert_file :initarg :cert-file :initform "/opt/consul/server.cert")
    (json-property::key_file :initarg :cert-file :initform "/opt/consul/server.key")
@@ -316,12 +370,35 @@
 ;; now I can start to describe services to consul
 ;; I should also be able to put in the Traefik information in these things...
 (defclass consul-service (json-named component)
-  ((json-property::address :initarg :address :reader address :type string)
-   (json-property::port :initarg :port :reader port :type (integer 1 65535))
-   (tags :initarg :tags :type list)
+  ((json-property::address :initarg :address :reader address :type string
+                           ;; used for unmarshalling responses:-
+                           :initarg :*address)
+   (json-property::port :initarg :port :reader port :type (integer 1 65535)
+                        :initarg :*SERVICE-PORT)
+   (tags :initarg :tags :type list
+         :initarg :*SERVICE-TAGS)
    (json-property::check :initarg :check :type consul-service-check :reader check)
    (traefik-router :initarg :traefik-router :initarg :router
-                   :type traefik-router :reader traefik-router)))
+                   :type traefik-router :reader traefik-router)
+
+   ;; the following slots don't have to be bound but WILL be retrieved on service lookup
+   (id :initarg :+ID+)
+   (node :initarg :*NODE)
+   (datacenter :initarg :*DATACENTER)
+   (tagged-addresses :initarg :*TAGGED-ADDRESSES)
+   (node-meta :initarg :*NODE-META)
+   (service-kind :initarg :*SERVICE-KIND)
+   (service-id :initarg :*SERVICE-+ID+)
+   (name :initarg :*SERVICE-NAME)
+   (service-address :initarg :*SERVICE-ADDRESS)
+   (service-weights :initarg :*SERVICE-WEIGHTS)
+   (service-meta :initarg :*SERVICE-META)
+   (service-enable-tag-override :initarg :*SERVICE-ENABLE-TAG-OVERRIDE)
+   (service-proxy :initarg :*SERVICE-PROXY)
+   (service-connect :initarg :*SERVICE-CONNECT)
+   (create-index :initarg :*CREATE-INDEX)
+   (modify-index :initarg :*MODIFY-INDEX)
+   ))
 
 
 (defmethod tags ((x consul-service))
@@ -465,11 +542,18 @@
 
 
 
-(defmethod consul-api-call ((x consul-deployment) url)
+;; This is kind of abnormal since it's potentially talking to consul
+;; deployment across different systems which may not be joined to the
+;; local DC. If I were just making a more 'normal' consul API I would
+;; do it a bit differently.
+
+;; Maybe I should do that as well. 
+
+(defmethod consul-api-call ((x consul-deployment) url &key (method "GET"))
   (let ((full-url (format nil "http://localhost:8500~A" url)))
     (json:decode-json-from-string
      (if (typep (host x) 'localhost)
-         (drakma:http-request full-url)
+         (drakma:http-request full-url :method method)
          (execute-command (host x)
                           "curl" full-url)))))
 
@@ -480,4 +564,21 @@
         ;; of course, adopting the service in this consul deployment isn't the right thing
         collect (adopt x (make-instance 'consul-service :name (string-downcase name)
                                                         :tags tags))))
+
+(defmethod catalog-service ((x consul-deployment) service)
+  (mapcar (lambda (x)
+            (apply #'make-instance
+                   (cons 'consul-service
+                         (loop for (a . b) in x
+                               collect a collect b))))
+          (consul-api-call x (format nil "/v1/catalog/service/~A" service))))
+
+
+
+(defmethod consul-key-value ((x consul-deployment) key)
+  (base64:base64-string-to-string
+   (cdr (assoc :*value
+               (first (consul-api-call x (concatenate 'string
+                                                      "/v1/kv/" key)))))))
+
 
