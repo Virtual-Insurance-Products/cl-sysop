@@ -21,6 +21,10 @@
   (setf (parent c) parent)
   c)
 
+(defun adopter (system)
+  (lambda (child)
+    (adopt system child)))
+
 (defmethod initialize-instance :after ((system system) &rest args)
   (declare (ignore args))
   (dolist (x (subcomponents system))
