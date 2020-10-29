@@ -22,7 +22,8 @@
   ((brew-installed-p :accessor brew-installed-p :initform t :initarg :brew-installed-p)))
 
 (defclass pkgin-host ()
-  ((pkgin-installed-p :accessor pkgin-installed-p :initform t :initarg :pkgin-installed-p)))
+  ((pkgin-installed-p :accessor pkgin-installed-p :initform t :initarg :pkgin-installed-p)
+   (needs-update-p :initform t :accessor needs-update-p)))
 
 ;; then we can do this...
 ;; this only changes the generic (abstract) type
@@ -126,7 +127,9 @@
 
 
 (defmethod install ((package pkgin-package))
-  (execute-command (host package)
-                   "pkgin"(list :y "update"))
+  (when (needs-update-p (host package))
+    (execute-command (host package)
+                     "pkgin"(list :y "update"))
+    (setf (needs-update-p (host package)) nil))
   (execute-command (host package)
                    "pkgin" (list :y "in" (name package))))
