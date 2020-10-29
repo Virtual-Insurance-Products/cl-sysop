@@ -9,7 +9,7 @@
 ;; if I make changing file content use patch and diff it will make it clearer what the actual change is
 ;; that will be really useful for seeing what I manually hacked!
 (defclass fs-file (fs-object)
-  ((content :initarg :content :reader content :type string)
+  ((content :initarg :content :type (or string function))
    ;; you can supply sha1 hash and/or content, though we won't be able to fix a missing file without the content from somewhere
    ;; without supplying either we're just asking for the file to exist
    (sha1-hash :initarg :sha1-hash :reader sha1-hash :type string)
@@ -25,6 +25,10 @@
                              "cat"
                              (full-path file))))))
 
+(defmethod content ((x fs-file))
+  (if (functionp (slot-value x 'content))
+      (funcall (slot-value x 'content))
+      (slot-value x 'content)))
 
 ;; It might be useful to define a constructor function, but I'm not sure
 
@@ -167,6 +171,11 @@
 (defmethod create ((x fs-file))
   (execute-command (host x)
                    "cat" `((> ,(full-path x)))
+                   :input (content x)))
+
+(defmethod append-file ((x fs-file))
+  (execute-command (host x)
+                   "cat" `((>> ,(full-path x)))
                    :input (content x)))
 
 (defmethod chmod ((x fs-file))
