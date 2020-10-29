@@ -21,6 +21,23 @@
 (defclass consul-ca (consul-identity)
   ())
 
+(defmethod initialize-instance :after ((x consul-ca) &rest initargs)
+  (declare (ignore initargs))
+  (unless (slot-boundp x 'certificate)
+    (in-temporary-directory nil
+      (execute-command (localhost)
+                       "consul"
+                       (list "tls" "ca" "create"))
+      ;; (execute-command (localhost) "ls" "-l")
+      ;; !!! Couldn't I use the files bit? But I need them first. 
+      (setf (slot-value x 'certificate)
+            (existing-content (adopt (localhost) (make-instance 'fs-file :full-path "consul-agent-ca.pem")))
+            (slot-value x 'key)
+            (existing-content (adopt (localhost) (make-instance 'fs-file :full-path "consul-agent-ca-key.pem")))))))
+
+;; This is all we need:-
+;; (make-instance 'consul-ca)
+
 ;; Although I could generalise this to other consul identities I don't think it will ever be needed to do so
 (defmethod print-object ((ca consul-ca) (s stream))
   (format s
@@ -37,22 +54,11 @@
                 (make-instance 'fs-file :full-path "consul-agent-ca-key.pem"
                                         :content (key ca)))))
 
-(defun make-consul-ca ()
-  (in-temporary-directory nil
-    (execute-command (localhost)
-                     "consul"
-                     (list "tls" "ca" "create"))
-    ;; (execute-command (localhost) "ls" "-l")
-    ;; !!! Couldn't I use the files bit? But I need them first. 
-    (make-instance 'consul-ca
-                   :certificate (existing-content (adopt (localhost) (make-instance 'fs-file :full-path "consul-agent-ca.pem")))
-                   :key (existing-content (adopt (localhost) (make-instance 'fs-file :full-path "consul-agent-ca-key.pem"))))
-    ))
-
 
 ;; !!! Finish this
 ;; it needs server vs client certificates
 ;; I don't think I need to generate client ones, but maybe I could
+;; !!! Also, this could /maybe/ be redone like the sshd one just using create-instance
 (defun make-consul-identity (ca &key (dc-name "dc1") (server t))
   (in-temporary-directory nil
     (mapcar #'create (files ca))
