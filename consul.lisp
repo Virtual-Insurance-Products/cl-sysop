@@ -398,6 +398,8 @@
    (service-connect :initarg :*SERVICE-CONNECT)
    (create-index :initarg :*CREATE-INDEX)
    (modify-index :initarg :*MODIFY-INDEX)
+
+   (service-tagged-addresses :initarg :*SERVICE-TAGGED-ADDRESSES)
    ))
 
 
