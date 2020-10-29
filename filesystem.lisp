@@ -200,10 +200,14 @@
                                                                  (vip-utils:random-string 20))))))
 
 (defun temporary-directory (content &optional (host (make-instance 'localhost :name "localhost")))
-  (create (adopt host
-                 (make-instance 'fs-directory :content content
-                                              :full-path (concatenate 'string "/tmp/"
-                                                                      (vip-utils:random-string 20))))))
+  (let* ((dir (adopt host
+                     (make-instance 'fs-directory :content content
+                                                  :full-path (concatenate 'string "/tmp/"
+                                                                          (vip-utils:random-string 20)))))
+         (plan (create-plan dir)))
+    ;; This will show lots of debug output
+    (execute-plan plan)
+    dir))
 
 (defmacro in-temporary-directory (content &body forms)
   (let ((dir (gensym "dir"))

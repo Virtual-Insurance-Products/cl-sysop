@@ -116,6 +116,15 @@
     (format s "~S~%" step))
   (format s "~%--- END OF PLAN ---~%"))
 
+(defun execute-plan (plan)
+  (let ((steps (length plan)))
+    (loop for (op . args) in plan
+          for step from 1
+          do (format t "~%********************************************************************************~%STEP ~A/~A :: ~A~%" step steps (cons op args))
+             (if (eq op 'setf)
+                 (funcall (fdefinition `(setf ,(first (first args))))
+                          (second args) (second (first args)))
+                 (apply op args)))))
 
 ;; this is intended for interactive use
 ;; for batch use do the other one
@@ -125,14 +134,7 @@
                     (error 'updates-required :plan plan))
       (apply-changes ()
         :report "Execute the plan to apply changes"
-        (let ((steps (length plan)))
-          (loop for (op . args) in plan
-                for step from 1
-                do (format t "~%********************************************************************************~%STEP ~A/~A :: ~A~%" step steps (cons op args))
-                   (if (eq op 'setf)
-                       (funcall (fdefinition `(setf ,(first (first args))))
-                                (second args) (second (first args)))
-                       (apply op args))))))))
+        (execute-plan plan)))))
 
 ;; then we can use the above and just provide something to invoke the condition handler
 
