@@ -29,7 +29,8 @@
   ((user :initarg :user :reader user)
    (access-from :initarg :access-from :initform (localhost) :reader access-from)
    ;; allow specification of which key to use for which host.
-   (key :initarg :key :reader key)
+   (key :initarg :key :reader key :type (or string fs-file ;; ssh-identity ;; pass a generated signed identity directly
+                                            ))
    (use-login-shell-p :initarg :use-login-shell-p :initform nil :reader use-login-shell-p)))
 
 
@@ -219,7 +220,12 @@
                                                    (user host) "@" (name host))
                                       (name host))
                                  ,@ (when (slot-boundp host 'key)
-                                      (list :i (key host)))
+                                      (list :i (etypecase (key host)
+                                                 (fs-file (full-path (key host)))
+                                                 (string (key host))
+                                                 ;; (ssh-identity ...)
+                                                 )))
+                                 
                                  ,(if (use-login-shell-p host)
                                       (make-shell-command "bash"
                                                           (list :l :c
