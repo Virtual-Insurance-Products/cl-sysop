@@ -3,7 +3,8 @@
 
 (defclass fs-object (component named)
   ((full-path :type string :accessor full-path :initarg :full-path)
-   (existing-content :reader existing-content)))
+   (existing-content :reader existing-content)
+   (exists-p :reader exists-p)))
 
 
 ;; if I make changing file content use patch and diff it will make it clearer what the actual change is
@@ -72,8 +73,12 @@
           (first (last (cl-ppcre:split "/" (full-path x)))))))
 
 ;; This is needed as otherwise the system #'exists-p will be called which assumes T
+(defmethod exists-p :before ((dir fs-directory))
+  (unless (slot-boundp dir 'exists-p)
+    (fs-object-exists-on-host dir (host dir))))
+
 (defmethod exists-p ((dir fs-directory))
-  (fs-object-exists-on-host dir (host dir)))
+  (slot-value dir 'exists-p))
 
 (defmethod update-plan :before ((dir fs-directory) &optional without)
   (declare (ignore without))
@@ -148,8 +153,10 @@
 (defmethod fs-object-exists-on-host ((f fs-object) (host localhost))
   (probe-file (full-path f)))
 
-(defmethod exists-p ((f fs-object))
-  (fs-object-exists-on-host f (host f)))
+(defmethod exists-p :before ((f fs-object))
+  (unless (slot-boundp f 'exists-p)
+    (setf (slot-value f 'exists-p)
+          (fs-object-exists-on-host f (host f)))))
 
 (defmethod fs-object-exists-on-host ((f fs-object) (host unix-host))
   (handler-case
