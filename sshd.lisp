@@ -9,7 +9,9 @@
 
 
 (defun ssh-identity-type-p (x)
-  (member x '("ed25519" "rsa") :test #'equal))
+  (member x '("ed25519" "rsa"
+              "ecdsa-sha2-nistp256" "dss"
+              ) :test #'equal))
 
 ;; this is an abstract base which can be implemented by various things...
 (defclass ssh-certificate-authority () ())
@@ -25,6 +27,21 @@
 
 (defmethod initialize-instance :after ((x ssh-identity) &rest initargs)
   (declare (ignore initargs))
+
+  ;; we can initialize using just a private key - pubkey can be derived
+  (when (and (slot-boundp x 'private-key)
+             (not (slot-boundp x 'public-key)))
+    ;; we can retrieve it...
+    (in-temporary-directory
+        (list (make-instance 'fs-file
+                             :permissions #o600
+                             :name "id" :content (private-key x)))
+      (setf (slot-value x 'public-key)
+            (execute-command (localhost)
+                             "ssh-keygen"
+                             (list "-y" "-f" "id")))))
+
+  ;; but if we don't have a public key by now then we'll generate a pair...
   (unless (slot-boundp x 'public-key)
     (unless (slot-boundp x 'type)
       (error "Specify :type of \"ed25519\" or \"rsa\""))
@@ -91,22 +108,29 @@
           (list :certificate (certificate x))))
 
 ;; container will normally be a fs-directory
-(defun read-ssh-identity (name container)
+(defun read-ssh-identity (name container &key public-only)
   (flet ((piece (name)
-           (existing-content (adopt container
-                                    (make-instance 'fs-file
-                                                   :parent container
-                                                   :name name)))))
-    (if (exists-p (adopt container
-                         (make-instance 'fs-file :name
-                                        (concatenate 'string name "-cert.pub"))))
-        (make-instance 'signed-ssh-identity
-                       :private-key (piece name)
-                       :public-key (piece (concatenate 'string name ".pub"))
-                       :certificate (piece (concatenate 'string name "-cert.pub")))
-        (make-instance 'ssh-identity
-                       :private-key (piece name)
-                       :public-key (piece (concatenate 'string name ".pub"))))))
+           (let ((file (adopt container
+                              (make-instance 'fs-file
+                                             :name name))))
+             (when (exists-p file)
+               (cl-ppcre:regex-replace "\\n$" (existing-content file) "")))))
+
+    (let ((public (piece (concatenate 'string name ".pub"))))
+      (when public
+        (let ((cert (piece (concatenate 'string name "-cert.pub")))
+              (key (unless public-only (piece name))))
+          (apply #'make-instance
+                 (cons (if cert
+                           'signed-ssh-identity
+                           'ssh-identity)
+                       (append
+                        (when key (list :private-key key))
+                        (when cert (list :certificate cert))
+                        (list :public-key public)
+                        (unless public-only
+                          (list ))))))))))
+
 
 
 
@@ -308,7 +332,7 @@
 (defclass ssh-key-pair (system fs-object)
   ((certificate-authority :initarg :certificate-authority :type ssh-certificate-authority
                           :reader certificate-authority)
-   (ssh-identity :accessor ssh-identity :type ssh-identity)
+   (ssh-identity :accessor ssh-identity :type ssh-identity :initarg :ssh-identity)
    (principals :initarg :principals :reader principals :type list)
    (valid-from :initarg :valid-from)
    (valid-to :initarg :valid-to))
@@ -353,36 +377,37 @@
                    (make-instance 'fs-file
                                   :name (concatenate 'string (name x) "-cert.pub")
                                   :content (lambda ()
-                                             (certificate (ssh-identity x))))))
-                  
-              ))))
+                                             (certificate (ssh-identity x))))))))))
+
 
 ;; existence is easy enough
 (defmethod exists-p ((pair ssh-key-pair))
-  (not (member nil
-               (mapcar #'exists-p
-                       (subcomponents pair)))))
+  (let ((sub (subcomponents pair)))
+    (and (exists-p (first sub))
+         (exists-p (second sub)))))
 
+;; we don't have to rebuild the keypair if it exists - only re-sign it
 (defmethod requires-rebuild-p ((x ssh-key-pair))
-  ;; if we get here we assume that the files exist
-  ;; if they exist then we can't really verify the private and pub keys if there's no CA
-  ;; - they're all equally as good.
-  ;; BUT if there's a CA...
-  (when (slot-boundp x 'certificate-authority)
-    (let ((existing (read-ssh-identity (name x) (parent x))))
-      (not (and (typep existing 'signed-ssh-identity)
-                (valid-p existing)
-                (every (lambda (p)
-                         (find p (principals existing) :test #'equal))
-                       (principals x)))))))
+  nil)
 
-;; If they don't need creating or rebuilding then we're good
 (defmethod update-plan ((x ssh-key-pair) &optional without)
-  (when without
-    (call-next-method)))
+  (if without
+      (call-next-method)
+      (when (slot-boundp x 'certificate-authority)
+        (setf (ssh-identity x)
+              (read-ssh-identity (name x) (parent x)))
+        (when (or (not (typep (ssh-identity x) 'signed-ssh-identity))
+                  (not (valid-p (ssh-identity x))))
+          `((sign ,x))))))
+
+(defmethod sign ((x ssh-key-pair))
+  (sign-ssh-identity (ssh-identity x)
+                     (certificate-authority x))
+  (create (third (subcomponents x))))
 
 ;; really nothing to do here. Maybe I should replace the destroy plan
-(defmethod destroy ((x ssh-key-pair)))
+(defmethod destroy ((x ssh-key-pair))
+  (mapcar #'destroy (subcomponents x)))
 
 
 
@@ -400,32 +425,84 @@
 (defmethod sshd-ca-file ((x smartos-host) content)
   (adopt x (make-instance 'fs-file :full-path "/usbkey/ssh/sshd-CA.pub" :content (format nil "~A~%" content))))
 
-;; (existing-content (sshd-config-file (localhost)))
-
-;; Should I turn config params to keywords? It is handy
-(defmethod sshd-config ((x unix-host))
-  (mapcar (lambda (line)
-            (let ((key (cl-ppcre:regex-replace "\\s+.*" line ""))
-                  (value (cl-ppcre:regex-replace ".*?\\s+" line "")))
-              (cons key value)))
-          (remove-if (lambda (x)
-                       (or (not (cl-ppcre:scan "[^\\s]" x))
-                           (cl-ppcre:scan "^\\s*\\#" x)))
-                     (cl-ppcre:split "\\n" (existing-content (sshd-config-file x))))))
-
-;; (sshd-config (localhost))
-;; (sshd-config (ovh1))
-
 
 ;; sshd configuration. This is sparse, so existing configuration
 (defclass sshd-configuration (component)
   ((allow-other-options-p :initarg :allow-other-options-p :initform t :reader allow-other-options-p)
    (trust-certificate-authority :initarg :trust-certificate-authority :initarg :trust-ca
                                 :type ssh-certificate-authority
-                                :reader trust-certificate-authority)))
+                                :reader trust-certificate-authority)
+   (sshd-configuration-file :initarg :sshd-configuration-file
+                            :initarg :config-file
+                            :reader sshd-configuration-file)
+   (existing :reader existing)))
+
+(defmethod sshd-configuration-file :before ((x sshd-configuration))
+  (unless (slot-boundp x 'sshd-configuration-file)
+    (setf (slot-value x 'sshd-configuration-file)
+          (sshd-config-file (host x))))
+  (when (stringp (slot-value x 'sshd-configuration-file))
+    (setf (slot-value x 'sshd-configuration-file)
+          (adopt (host x)
+                 (make-instance 'fs-file
+                                :full-path (slot-value x 'sshd-configuration-file))))))
 
 ;; Let's assume that /some/ configuration exists
 (defmethod exists-p ((x sshd-configuration)) t)
+
+(defmethod existing :before ((x sshd-configuration))
+  (unless (slot-boundp x 'existing)
+    (setf (slot-value x 'existing)
+          (mapcar (lambda (line)
+                    (let ((key (cl-ppcre:regex-replace "\\s+.*" line ""))
+                          (value (cl-ppcre:regex-replace "\\s+\\#.*"
+                                                         (cl-ppcre:regex-replace ".*?\\s+" line "")
+                                                         "")))
+                      (cons key value)))
+                  (remove-if (lambda (x)
+                               (or (not (cl-ppcre:scan "[^\\s]" x))
+                                   (cl-ppcre:scan "^\\s*\\#" x)))
+                             (cl-ppcre:split "\\n" (existing-content (sshd-configuration-file x))))))))
+
+(defmethod pid-file ((x sshd-configuration))
+  (adopt (host x)
+         (make-instance
+          'fs-file
+          :full-path (or (cdr (find "PidFile" (existing x)
+                                    :key #'car :test #'equal))
+                         ;; the default
+
+                         ;; It would be good if I could get all the
+                         ;; default options and encode them in the
+                         ;; above class definition It shouldn't be
+                         ;; hard Then I could return mutli values
+                         ;; indicating whether a configuration was set
+                         ;; or not
+                         "/var/run/sshd.pid"))))
+
+(defmethod process-id ((x sshd-configuration))
+  (cl-ppcre:regex-replace "\\n" (existing-content (pid-file x)) ""))
+
+(defmethod host-key-pairs ((x sshd-configuration))
+  (loop for value in (or (mapcar #'cdr
+                                 (remove "HostKey" (existing x) :test-not #'equal :key #'car))
+                         ;; defaults
+                         '("/etc/ssh/ssh_host_rsa_key" "/etc/ssh/ssh_host_ecdsa_key" "/etc/ssh/ssh_host_ed25519_key"))
+        collect (let ((dir (cl-ppcre:regex-replace "/[^\\/]+$" value ""))
+                      (name (cl-ppcre:regex-replace "^.*\\/" value "")))
+                  (adopt (host x)
+                         (make-instance 'ssh-key-pair
+                                        :full-path value
+                                        :name name
+                                        :ssh-identity
+                                        (read-ssh-identity name (adopt (host x)
+                                                                       (make-instance 'fs-directory
+                                                                                      :content nil
+                                                                                      :full-path dir))
+                                                           :public-only t))))))
+
+(defmethod host-keys ((x sshd-configuration))
+  (mapcar #'ssh-identity (host-key-pairs x)))
 
 ;; So, let's work out what updates are required.
 ;; This requires examining slots which are ssh configuration parameter names
@@ -434,9 +511,9 @@
   (when without
     (error "sshd config removal not yet implemented"))
   (when (slot-boundp x 'trust-certificate-authority)
-    (let* ((existing (sshd-config (host x)))
-           (ca-key-file (cdr (find "TrustedUserCAKeys" existing :key #'car :test #'equal)))
-           (ca-file (sshd-ca-file (host x) (public-key (trust-certificate-authority x)))))
+    (let ((ca-key-file (cdr (find "TrustedUserCAKeys"
+                                  (existing x)
+                                  :key #'car :test #'equal))))
 
       (if ca-key-file
           ;; now we have to look in the CA file to see if it trusts this public key...
@@ -449,15 +526,29 @@
                       :test #'equal)
                 ;; nothing to do
                 nil
-                `((append-file (adopt (host x)
-                                      (make-instance 'fs-file
-                                                     :full-path ca-key-file
-                                                     :content (format nil "~A~%"
-                                                                      (public-key (trust-certificate-authority x)))))))
+                `((append-file ,(adopt (host x)
+                                       (make-instance 'fs-file
+                                                      :full-path ca-key-file
+                                                      :content (format nil "~A~%"
+                                                                       (public-key (trust-certificate-authority x)))))))
                 ))
-          `((append-file ,(let ((file (sshd-config-file (host x))))
-                            (setf (slot-value file 'content)
-                                  (format nil "~%TrustedUserCAKeys ~A~%"
-                                          (full-path ca-file)))
-                            file))
-            (create ,ca-file))))))
+          (create-plan x)))))
+
+;; If we're just creating it due to non existence of host system then it's simpler
+(defmethod create-plan ((x sshd-configuration))
+  (when (slot-boundp x 'trust-certificate-authority)
+    (let ((ca-file (sshd-ca-file (host x)
+                                 (public-key (trust-certificate-authority x)))))
+      `((append-file ,(let ((file (sshd-configuration-file x)))
+                        (setf (slot-value file 'content)
+                              (format nil "~%TrustedUserCAKeys ~A~%"
+                                      (full-path ca-file)))
+                        file))
+        (create ,ca-file)
+        (sighup ,x)))))
+
+;; send a HUP to reload the configuration
+(defmethod sighup ((x sshd-configuration))
+  (execute-command (host x)
+                   "kill"
+                   (list "-HUP" (process-id x))))
