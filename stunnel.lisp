@@ -34,9 +34,12 @@
 ;; (vms (ovh1))
 ;; with a catalog of defined VMs.
 
+(defmethod services-to-proxy ((x stunnel-zone))
+  (host-sni-exposed-services (proxy-from x) (parent x)))
+
 (defmethod subcomponents ((x stunnel-zone))
   (when (slot-boundp x 'parent)
-    (let ((services-to-proxy (host-sni-exposed-services (proxy-from x) (parent x)))
+    (let ((services-to-proxy (services-to-proxy x))
           (port-map (make-hash-table))
           ;; this is the 'output' map used for the consul service registrations
           (services))
