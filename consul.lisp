@@ -370,6 +370,11 @@
   (append (call-next-method)
           `((:method . ,(string-upcase (method c))))))
 
+(defun traefik-router-listp (x)
+  (and (listp x)
+       (every (lambda (x) (typep x 'traefik-router))
+              x)))
+
 ;; Script checks for checking all kinds of things
 
 
@@ -385,7 +390,9 @@
          :initarg :*SERVICE-TAGS)
    (json-property::check :initarg :check :type consul-service-check :reader check)
    (traefik-router :initarg :traefik-router :initarg :router
-                   :type traefik-router :reader traefik-router)
+                   :type (or traefik-router
+                             (and list
+                                  (satisfies traefik-router-listp))) :reader traefik-router)
 
    ;; the following slots don't have to be bound but WILL be retrieved on service lookup
    (id :initarg :+ID+)
@@ -413,14 +420,19 @@
   (append (when (slot-boundp x 'tags)
             (slot-value x 'tags))
           (when (slot-boundp x 'traefik-router)
-            (tag-strings (traefik-router x)))))
+            (if (listp (traefik-router x))
+                (reduce #'append
+                        (mapcar #'tag-strings
+                                (traefik-router x)))
+                (tag-strings (traefik-router x))))))
+
 
 (defmethod tags-alist ((x consul-service))
   (loop for tag in (tags x)
-        when (cl-ppcre:scan "=" tag)
-          collect (destructuring-bind (name value)
-                      (cl-ppcre:split "=" tag)
-                    (cons name value))))
+     when (cl-ppcre:scan "=" tag)
+     collect (destructuring-bind (name value)
+                 (cl-ppcre:split "=" tag)
+               (cons name value))))
 
 (defmethod json-spec ((s consul-service))
   `((:service . ,(append (call-next-method)
