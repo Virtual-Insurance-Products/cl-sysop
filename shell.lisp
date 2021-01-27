@@ -61,7 +61,7 @@
                                (error (make-string-output-stream)))
   ;; (declare (ignore error))
   (when echo-command
-    (format *standard-output* "~%;;      ~A~%" x))
+    (format *standard-output* ";;      ~A~%" x))
   (cond ((eq output :string)
          (with-output-to-string (stream)           
            (execute-with-shell x :input input :output stream :error error :echo-command nil)))

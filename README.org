@@ -1,159 +1,52 @@
+#+TITLE: Common Lisp System Operator
 
-* Progress
-I'm starting to sketch out the general outline of the thing. I'm
-inclined to think that having declared the system I should be able to
-just go:-
+* Introduction
+~cl-sysop~ allows you to specify /systems/ of /components/. It then
+provides a framework to evaluate those specifications against actual
+systems and determine what, if any, changes should be made in order to
+make the system match the specification. 
 
+If any changes would be required these are assembled into a plan,
+which is then presented to you in the CL debugger. If you approve of
+the plan you can then invoke the 'Apply Changes' restart and
+~cl-sysop~ will make the system match the specification.
+
+The system descriptions are constructed from CLOS instances.
+
+There are classes provided for describing unix systems accessible via
+SSH. The methods for executing steps of the plan are then able to
+execute commands on remote hosts (as well as the localhost).
+
+** Example
 #+begin_src lisp
-(update-plan <some-system-description>)
+(in-package :cl-sysop)
+
+(update
+ ;; the following is a description of a system which is a localhost
+ ;; (running cl-sysop) containing one file with a specified content.
+ (localhost
+  (make-instance 'fs-file
+                 :full-path "/tmp/greet.txt"
+                 :content "Hello, world! ")))
 #+end_src
 
-...and get a list of steps which need to be performed to make reality
-match. 
+The ~localhost~ function takes a list of components as parameters. In
+this case one has been provided. The value returned from ~(localhost
+...)~ is a system (subclass of the ~system~ class). The ~#'update~
+function then evaluates the system to determine whether what it
+describes matches reality. If not the debugger pops up with a
+~UPDATES-REQUIRED~ condition and you can either perform the
+~APPLY-CHANGES~ restart, which will execute the shown plan /or/ you
+can press 'q' (in SLIME) to not apply the changes. 
 
-1. Basic FS operations
-   1. permissions, groups
-   2. compare file content with sha1 hash (command might differ on
-      different systems)
-2. downloaded resources
-3. caching for same
-4. services
-5. packages
-6. vmadm
-7. images
-8. utilities for certs
-9. service definitions for consul etc
-10. zfs file systems
-    1. including snapshot management
-    2. periodic scrubs? 
+From the SLIME debugger you can also expand the stack frame for the
+update call to look at the ~plan~ object (bound to that variable) in
+more detail. 
 
-What is the next priority for the DTW site? I need to get that up and
-should build out this cl-sysop as needed for doing that. 
+SLIME is the main (currently) user interface to ~cl-sysop~. 
 
-* Questions
-** Do I need a reified representation of differences between desired and actual state? 
-   
-   Or is the plan an adequate description of that?
-   If it isn't then what form will it take? 
-   
-   I'm not sure if I do really. 
+If you change the value of the ~:content~ slot in the above definition
+and re-evaluate the ~update~ call (top level form) then cl-sysop will
+check that the file exists, check its content, notice that it doesn't
+match and then make a plan to update it. 
 
-** Can plan steps just reify as function applications?
-   It would kind of seem they can, though I'm not sure. Do I need to
-   make another kind of thing to represent them or not? CLIM commands
-   are just simple s-expressions which can be evaluated. They have
-   nice print representations.
-
-   I might end up doing CLIM things here anyway. Not sure. 
-
-Let's suppose that plan steps are just like CLIM commands. Then the
-plan is just a list of method calls to invoke. So each kind of object
-has:-
-1. a set of methods for changing its state
-2. a create method
-3. a destroy method
-4. a method for looking at all the properties and seeing whether they
-   match what reality and, if they don't, generating calls to mutate
-   the object
-5. a method to determine whether to just give up, nuke the thing and
-   start over.
-
-Now, we can invoke those things in an imperative way of course, so we
-can just call ~(destroy obj)~ and then ~(create obj)~ if we
-wish. However, a generally more useful thing will be to call
-~(plan-update obj)~ to get a plan. 
-
-** Secrets
-Handling secrets with the condition system would seem good. I can have
-restarts to get secrets from vault if possible, or restarts to ask for
-secrets interactively. Then I can store SSH keys in the system
-definitions and put the private key in encrypted. 
-
-** Modifying zones
-~zonecfg -z gw -f /tmp/gw.zone~ seems to be how to change running
-zones with things like 
-#+begin_quote
-add attr
-  set name=bootrom
-  set type=string
-  set value=BHYVE_RELEASE
-end
-#+end_quote
-
-Since I have the command for adding loop file systems that's what I'd
-have to use to do what I did for the ABEL zone. This will all take a
-bit of work.
-
-** Genesis
-I guess I can start to build some pieces of this thing and just put an
-ASDF system into certain repositories until I build the whole
-thing. It will be useful for doing some of the setup. If the notation
-for the setup is very concise. 
-
-** OpenBSD pf example
-I should be able to make a set of object describing the syntax of
-pf.conf. Then I make a class for pf itself with a list of those. Then
-to update the pf I print-object (or similar) all those objects and
-then put the result into a temporary file and load it into pf. If it
-works I mv that file ontop of the old one. Of course, if the old one
-matches there is nothing to do. On error I just clear out the new one
-(if I want) and show the stderr.
-
-I must just get the command driver in place. 
-
-** State maintenance
-I can probably do a lot with this declarative notation. For example,
-if I have something running and periodically evaluating the state of
-the world and the state describes that there should be snapshots on
-some particular schedule and they should be cleared off if older than
-some certain time. 
-
-Likewise evaluating whether services are running and responding to
-HTTP requests could be done in the same way. It would be good if we
-didn't keep restarting things on a rapid schedule. 
-
-Also LOGGING is going to be a Very Good Idea for this sort of thing. I
-need a way of dealing with that. Not sure what. 
-
-It would also probably be very useful to integrate with consul
-somehow. We can use KV storage for a start. I need to do some module
-to integrate with that.
-
-Ideally I would need some flexibility here to monitor different
-systems on different schedules. It would be good to be multi threaded
-here too. Perhaps start a thread for each one. 
-
-** Installation on other systems
-Of course, if I run this thing in, say, the ovh1 GZ then I can connect
-via slime (advertise via consul) and control things like that. 
-
-I would need, somehow, to have system definitions stored somewhere. It
-would make sense to have them contained in a git repository and one of
-the system definitions the system evaluates would be to update its
-system definitions and then restart itself if they change. I need a
-way to check to see if a git repo needs to be updated, so I must
-automate that.
-
-I think this is all looking very much inline with the vague idea I had
-for Red Queen. 
-
-* More Features
-** OpenBSD services and pf
-** set up tor hidden services
-Eg hidden websites on tor. 
-
-https://news.ycombinator.com/item?id=24474309
-
-** Raspberry Pi config
-For installing consul for example. 
-* Execution Engine
-It might be a very good idea to replace my shell execution gubbins
-with one of the following. 
-- https://github.com/fare/inferior-shell
-- https://github.com/deepfire/executor/
-
-This would give us portability, for one thing (if I use portable MOP
-instead of CCL MOP).
-
-I would have to be careful though, as my thing works quite well with
-error handling. 
