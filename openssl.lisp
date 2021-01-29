@@ -31,8 +31,7 @@
 ;; Obviously you have to save the key!
 ;; (make-rsa-certificate (make-rsa-key))
 
-(defun make-rsa-certificate-signing-request (private-key &key (days 1024)
-                                                           (country "GB")
+(defun make-rsa-certificate-signing-request (private-key &key (country "GB")
                                                            (state "DV")
                                                            (org "VIP")
                                                            (common-name "example.com"))
@@ -42,14 +41,13 @@
                          :key "/dev/stdin"
                          :subj (format nil "/C=~A/ST=~A/O=~A/CN=~A"
                                        country state org common-name)
-                         :sha256
-                         :days days)
+                         :sha256)
                    
                    :input private-key))
 
 ;; (make-rsa-certificate-signing-request (make-rsa-key))
 
-(defun sign-certificate-request (csr ca ca-key)
+(defun sign-certificate-request (csr ca ca-key &key (days 1024))
   (with-temporary-resources
       ((csr (temporary-file csr))
        (ca (temporary-file ca))
@@ -58,6 +56,7 @@
     (execute-command (localhost)
                      "openssl"
                      (list "x509" :req :in (full-path csr)
+                           "-days" days
                            "-CA" (full-path ca)
                            "-CAkey" (full-path ca-key)
                            "-CAcreateserial"))))
