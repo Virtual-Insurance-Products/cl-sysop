@@ -102,5 +102,13 @@ cert = /etc/stunnel/client.cert
                                            :name "stunnel"
                                            :start-command "/opt/local/bin/stunnel /etc/stunnel/stunnel.conf")))))))
 
+(defmethod update-plan ((x stunnel-zone) &optional without)
+  (declare (ignore without))
+  (let ((rest (call-next-method)))
+    (when rest
+      (append rest
+              `((restart-stunnel-service ,x))))))
 
-
+(defmethod restart-stunnel-service ((x stunnel-zone))
+  (execute-command x "svcadm"
+                   (list "restart" "svc:/stunnel:default")))
