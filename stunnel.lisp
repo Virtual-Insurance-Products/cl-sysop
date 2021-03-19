@@ -53,6 +53,8 @@
                                                       'fs-file :name "stunnel.conf"
                                                       :content
                                                       (with-output-to-string (stream)
+                                                        (format stream "output = /var/log/stunnel.log~%")
+
                                                         (loop for (name sni port) in services-to-proxy
                                                               do
                                                                  (loop while (gethash port port-map)
